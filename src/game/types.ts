@@ -9,7 +9,7 @@ export type SpellKind = 'blade' | 'shockwave' | 'overcharge';
 export type ParticleKind = 'circle' | 'smoke' | 'grass' | 'spark';
 
 export const MAX_UNIT_LEVEL = 4;
-export const TOTAL_STAGES = 30;
+export const TOTAL_STAGES = 10;
 
 export interface RouteWaypoint {
   x: number;

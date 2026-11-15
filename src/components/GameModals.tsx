@@ -30,17 +30,18 @@ export const GameModals: React.FC<GameModalsProps> = ({
   if (hud.phase === 'title') {
     const stageCfg = getStageConfig(selectedStage);
     return (
-      <div className="fixed inset-0 z-30 flex flex-col items-center justify-between px-4 py-3 sm:px-6 sm:py-4">
+      <div className="fixed inset-0 z-30 flex flex-col items-center justify-between px-4 py-3 sm:px-6 sm:py-5">
         {/* Clean Bespoke Inline SVG Title Crest */}
         <div className="flex flex-col items-center text-center">
           <svg
             viewBox="0 0 430 124"
-            className="w-[260px] sm:w-[350px] drop-shadow-[0_6px_0_rgba(16,32,12,0.72)]"
+            className="w-[270px] sm:w-[360px] drop-shadow-[0_6px_0_rgba(16,32,12,0.72)]"
             role="img"
             aria-label="Ember Ring Defense"
           >
             <rect x="14" y="20" width="402" height="94" rx="24" fill="#1D3115" stroke="#FDE047" strokeWidth="4" />
             <rect x="22" y="28" width="386" height="78" rx="18" fill="#2A461E" />
+            {/* Castle Battlement Crest Icon */}
             <path
               d="M190 22V8h8v5h6V8h8v5h6V8h8v14z"
               fill="#E2E8F0"
@@ -79,13 +80,13 @@ export const GameModals: React.FC<GameModalsProps> = ({
           </svg>
         </div>
 
-        {/* Bottom Stage Selector (1-30 scrollable grid) + Start CTA */}
-        <div className="flex w-full max-w-md flex-col items-center gap-2.5 pb-1">
+        {/* Bottom Stage Selector (1-10) + Start CTA */}
+        <div className="flex w-full max-w-md flex-col items-center gap-3 pb-1">
           <div
             aria-label="Seletor de Fases"
-            className="w-full rounded-2xl border-2 border-[#1B2C13] bg-[#1E3115]/96 p-3 shadow-[0_6px_0_rgba(15,28,10,0.7)]"
+            className="w-full rounded-2xl border-2 border-[#1B2C13] bg-[#1E3115]/96 p-3.5 shadow-[0_6px_0_rgba(15,28,10,0.7)]"
           >
-            <div className="mb-2 flex items-center justify-between gap-2 text-xs font-bold">
+            <div className="mb-2.5 flex items-center justify-between gap-2 text-xs font-bold">
               <span className="truncate text-[#FDE047]">
                 Fase {selectedStage} · {stageCfg.title}
               </span>
@@ -94,35 +95,33 @@ export const GameModals: React.FC<GameModalsProps> = ({
               </span>
             </div>
 
-            <div className="max-h-[130px] overflow-y-auto pr-1">
-              <div className="grid grid-cols-6 gap-1.5 sm:grid-cols-6">
-                {STAGES.map((stageNum) => {
-                  const unlocked = stageNum <= hud.highestUnlockedStage;
-                  const active = stageNum === selectedStage;
-                  return (
-                    <button
-                      key={stageNum}
-                      type="button"
-                      disabled={!unlocked}
-                      data-testid={`stage-btn-${stageNum}`}
-                      aria-label={unlocked ? `Selecionar Fase ${stageNum}` : `Fase ${stageNum} bloqueada`}
-                      onClick={() => {
-                        soundEngine.playClick();
-                        onSelectStage(stageNum);
-                      }}
-                      className={`font-mono-tabular flex h-8 items-center justify-center gap-1 rounded-lg border-2 text-xs font-bold transition-transform active:translate-y-0.5 ${
-                        !unlocked
-                          ? 'cursor-not-allowed border-[#14220E] bg-[#172610] text-white/35'
-                          : active
-                            ? 'border-[#FDE047] bg-[#F97316] text-white shadow-[0_2px_0_#9A3412]'
-                            : 'border-[#253B1A] bg-[#2D481F] text-[#FEF9C3] hover:bg-[#3A5D28]'
-                      }`}
-                    >
-                      {unlocked ? stageNum : <Lock className="h-3 w-3" />}
-                    </button>
-                  );
-                })}
-              </div>
+            <div className="grid grid-cols-5 gap-2">
+              {STAGES.map((stageNum) => {
+                const unlocked = stageNum <= hud.highestUnlockedStage;
+                const active = stageNum === selectedStage;
+                return (
+                  <button
+                    key={stageNum}
+                    type="button"
+                    disabled={!unlocked}
+                    data-testid={`stage-btn-${stageNum}`}
+                    aria-label={unlocked ? `Selecionar Fase ${stageNum}` : `Fase ${stageNum} bloqueada`}
+                    onClick={() => {
+                      soundEngine.playClick();
+                      onSelectStage(stageNum);
+                    }}
+                    className={`font-mono-tabular flex h-10 items-center justify-center gap-1 rounded-xl border-2 text-sm font-bold transition-transform active:translate-y-0.5 ${
+                      !unlocked
+                        ? 'cursor-not-allowed border-[#14220E] bg-[#172610] text-white/35'
+                        : active
+                          ? 'border-[#FDE047] bg-[#F97316] text-white shadow-[0_3px_0_#9A3412]'
+                          : 'border-[#253B1A] bg-[#2D481F] text-[#FEF9C3] hover:bg-[#3A5D28]'
+                    }`}
+                  >
+                    {unlocked ? stageNum : <Lock className="h-3.5 w-3.5" />}
+                  </button>
+                );
+              })}
             </div>
           </div>
 
@@ -133,13 +132,13 @@ export const GameModals: React.FC<GameModalsProps> = ({
               soundEngine.playClick();
               onStart(selectedStage);
             }}
-            className="font-display flex items-center justify-center gap-2 rounded-2xl border-4 border-[#15240E] bg-[#F97316] px-8 py-2.5 text-lg font-bold tracking-wide text-white shadow-[0_5px_0_#9A3412] transition-transform hover:-translate-y-0.5 hover:bg-[#FB923C] active:translate-y-1 active:shadow-[0_2px_0_#9A3412] sm:text-xl"
+            className="font-display flex items-center justify-center gap-2.5 rounded-2xl border-4 border-[#15240E] bg-[#F97316] px-10 py-3 text-xl font-bold tracking-wide text-white shadow-[0_6px_0_#9A3412] transition-transform hover:-translate-y-0.5 hover:bg-[#FB923C] active:translate-y-1 active:shadow-[0_2px_0_#9A3412] sm:text-2xl"
           >
-            <Play className="h-4.5 w-4.5 fill-current" />
+            <Play className="h-5 w-5 fill-current" />
             <span>Jogar Fase {selectedStage}</span>
           </button>
 
-          <p className="text-outline-dark text-center text-[11px] font-bold tracking-wide text-[#FEF9C3]">
+          <p className="text-outline-dark text-center text-xs font-bold tracking-wide text-[#FEF9C3]">
             1-3 Tropas · Arraste Iguais para Fundir · Q/W/E Habilidades · P Pausar
           </p>
         </div>
@@ -253,7 +252,7 @@ export const GameModals: React.FC<GameModalsProps> = ({
             {isVictory
               ? hasNextStage
                 ? `Fase ${hud.stage + 1} desbloqueada`
-                : 'Todas as 30 fases defendidas!'
+                : 'Todas as 10 fases defendidas!'
               : `Fase ${hud.stage} · Onda ${hud.wave}/${hud.totalWavesInStage}`}
           </p>
 

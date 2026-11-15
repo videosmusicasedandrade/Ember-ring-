@@ -23,42 +23,20 @@ const STAGE_TITLES = [
   'Marcha da Horda',
   'Muralha do Vale',
   'Cerco ao Castelo',
-  'Vale dos Ventos',
-  'Bosque Sussurrante',
-  'Ponte Elevadiça',
-  'Colinas Sombrias',
-  'Desfiladeiro de Pedra',
-  'Planície dos Ecos',
-  'Fronteira Antiga',
-  'Trilha do Dragão',
-  'Bastião Oculto',
-  'Portão do Norte',
-  'Bosque Esmeralda',
-  'Ravina Profunda',
-  'Alto da Cidadela',
-  'Vale das Brumas',
-  'Orla Silenciosa',
-  'Trilha do Crepúsculo',
-  'Fortaleza de Ferro',
-  'Desfiladeiro Sombrio',
-  'Muralha dos Heróis',
-  'Trono da Alvorada',
 ];
 
 export function getStageConfig(stageNumber: number): StageConfig {
   const stage = Math.max(1, Math.min(TOTAL_STAGES, Math.floor(stageNumber)));
-  const totalWaves = stage <= 5 ? 2 : stage <= 15 ? 3 : stage <= 25 ? 4 : 5;
-  // Gentle 3.5% difficulty escalation per stage for smooth, long progression
-  const diffFactor = 1 + (stage - 1) * 0.036;
+  const totalWaves = stage === 1 ? 2 : stage <= 4 ? 3 : stage <= 8 ? 4 : 5;
   return {
     stage,
     title: STAGE_TITLES[stage - 1] ?? `Fase ${stage}`,
     totalWaves,
-    baseEnemiesPerWave: Math.round(5 + stage * 1.35),
-    hpMultiplier: Number(diffFactor.toFixed(3)),
-    speedMultiplier: Number(Math.min(1.45, 1 + (stage - 1) * 0.012).toFixed(3)),
-    spawnInterval: Number(Math.max(0.38, 1.35 - (stage - 1) * 0.032).toFixed(3)),
-    bossHp: Math.round(250 * diffFactor + (stage - 1) * 45),
+    baseEnemiesPerWave: 6 + stage * 2,
+    hpMultiplier: 1 + (stage - 1) * 0.22,
+    speedMultiplier: Math.min(1.52, 1 + (stage - 1) * 0.05),
+    spawnInterval: Math.max(0.45, 1.32 - (stage - 1) * 0.08),
+    bossHp: Math.round(280 + (stage - 1) * 145),
   };
 }
 
@@ -379,6 +357,7 @@ export function findNearestEnemyInRange(
     const distFromUnit = distanceBetween(unit.x, unit.y, enemy.x, enemy.y);
     if (distFromUnit > unit.range + enemy.radius) continue;
 
+    // Prioritize enemy furthest along the path toward the Castle
     if (
       enemy.pathProgress > bestProgress + 0.002 ||
       (Math.abs(enemy.pathProgress - bestProgress) <= 0.002 && distFromUnit < bestDist)
@@ -527,14 +506,14 @@ export function computeWaveConfig(
   const stageCfg = getStageConfig(stage);
   const clampedWave = Math.max(1, wave);
   const totalEnemies = stageCfg.baseEnemiesPerWave + (clampedWave - 1) * 3;
-  const spawnInterval = Math.max(0.36, stageCfg.spawnInterval - (clampedWave - 1) * 0.06);
-  const hpMultiplier = stageCfg.hpMultiplier * (1 + (clampedWave - 1) * 0.12);
-  const speedMultiplier = Math.min(1.5, stageCfg.speedMultiplier + (clampedWave - 1) * 0.025);
+  const spawnInterval = Math.max(0.36, stageCfg.spawnInterval - (clampedWave - 1) * 0.08);
+  const hpMultiplier = stageCfg.hpMultiplier * (1 + (clampedWave - 1) * 0.18);
+  const speedMultiplier = Math.min(1.6, stageCfg.speedMultiplier + (clampedWave - 1) * 0.04);
 
   const bruteWeight =
-    stage >= 3 || clampedWave >= 2 ? Math.min(0.3, 0.06 + (stage - 1) * 0.015 + (clampedWave - 1) * 0.03) : 0.06;
-  const shieldedWeight = Math.min(0.38, 0.2 + (stage - 1) * 0.01 + (clampedWave - 1) * 0.03);
-  const walkerWeight = Math.max(0.3, 1 - bruteWeight - shieldedWeight);
+    stage >= 2 || clampedWave >= 2 ? Math.min(0.32, 0.08 + (stage - 1) * 0.03 + (clampedWave - 1) * 0.05) : 0.08;
+  const shieldedWeight = Math.min(0.4, 0.22 + (stage - 1) * 0.02 + (clampedWave - 1) * 0.04);
+  const walkerWeight = Math.max(0.28, 1 - bruteWeight - shieldedWeight);
 
   return {
     totalEnemies,

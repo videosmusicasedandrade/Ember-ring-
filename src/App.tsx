@@ -4,7 +4,7 @@ import { GameHUD } from './components/GameHUD';
 import { GameModals } from './components/GameModals';
 import { soundEngine } from './game/audio';
 import { GameSimulation } from './game/simulation';
-import { HudSnapshot, SpellKind, TOTAL_STAGES, UnitKind } from './game/types';
+import { HeroClass, HudSnapshot, SpellKind, TOTAL_STAGES, UnitKind } from './game/types';
 
 export default function App() {
   const simRef = useRef<GameSimulation | null>(null);
@@ -17,8 +17,16 @@ export default function App() {
         Number.isFinite(stageParam) && stageParam >= 1 && stageParam <= TOTAL_STAGES
           ? stageParam
           : 1;
+      const heroParam = params.get('hero');
+      const heroOverride: HeroClass | undefined =
+        heroParam === 'archer' || heroParam === 'swordsman' || heroParam === 'bomber'
+          ? heroParam
+          : undefined;
+      if (heroOverride) {
+        sim.setHeroClass(heroOverride);
+      }
       if (params.get('autostart') === '1') {
-        sim.resetWorld('playing', initialStage);
+        sim.resetWorld('playing', initialStage, heroOverride);
       }
     }
     simRef.current = sim;
@@ -38,10 +46,15 @@ export default function App() {
     document.body.dataset.state = snap.phase === 'victory' ? 'gameover' : snap.phase;
     document.body.dataset.outcome = snap.phase;
     document.body.dataset.stage = String(snap.stage);
+    document.body.dataset.route = snap.routeArchetype;
     document.body.dataset.unlocked = String(snap.highestUnlockedStage);
+    document.body.dataset.heroClass = snap.selectedHeroClass;
+    document.body.dataset.heroLevel = String(snap.heroLevel);
+    document.body.dataset.heroXp = String(snap.heroXp);
     document.body.dataset.units = String(snap.unitCount);
     document.body.dataset.merges = String(snap.mergesPerformed);
     document.body.dataset.maxUnitLevel = String(snap.maxUnitLevelReached);
+    document.body.dataset.combo = String(snap.comboCount);
     document.body.dataset.targeting = snap.targetingSpell ?? '';
     document.body.dataset.overcharge = snap.overchargeTimer > 0 ? '1' : '0';
   }, []);
@@ -57,6 +70,28 @@ export default function App() {
   useEffect(() => {
     syncBodyDataset(hud);
   }, [hud, syncBodyDataset]);
+
+  const handleSelectHero = useCallback(
+    (heroClass: HeroClass) => {
+      const sim = simRef.current;
+      if (!sim) return;
+      sim.setHeroClass(heroClass);
+      syncHud();
+    },
+    [syncHud]
+  );
+
+  const handleSelectStage = useCallback(
+    (stageNum: number) => {
+      const sim = simRef.current;
+      setSelectedStage(stageNum);
+      if (sim && sim.phase === 'title') {
+        sim.resetWorld('title', stageNum);
+        syncHud();
+      }
+    },
+    [syncHud]
+  );
 
   const handleStart = useCallback(
     (stage?: number) => {
@@ -144,6 +179,13 @@ export default function App() {
     sim.startCardDrag(kind, pt.x, pt.y);
   }, []);
 
+  const handleToggleHeroReposition = useCallback(() => {
+    const sim = simRef.current;
+    if (!sim) return;
+    sim.toggleHeroRepositionMode();
+    syncHud();
+  }, [syncHud]);
+
   const handleActivateSpell = useCallback(
     (kind: SpellKind) => {
       const sim = simRef.current;
@@ -180,7 +222,11 @@ export default function App() {
         return;
       }
 
-      if (e.key === 'Escape' && sim.phase === 'playing' && sim.spells.targetingSpell) {
+      if (
+        e.key === 'Escape' &&
+        sim.phase === 'playing' &&
+        (sim.spells.targetingSpell || sim.heroRepositionMode)
+      ) {
         sim.cancelSpellTargeting();
         syncHud();
         return;
@@ -215,6 +261,7 @@ export default function App() {
         if (e.key === '1') handleSelectUnit('scout');
         else if (e.key === '2') handleSelectUnit('shield');
         else if (e.key === '3') handleSelectUnit('frog');
+        else if (e.key === 'h' || e.key === 'H') handleToggleHeroReposition();
         else if (e.key === 'q' || e.key === 'Q') handleActivateSpell('blade');
         else if (e.key === 'w' || e.key === 'W') handleActivateSpell('shockwave');
         else if (e.key === 'e' || e.key === 'E') handleActivateSpell('overcharge');
@@ -227,6 +274,7 @@ export default function App() {
     handleActivateSpell,
     handleSelectUnit,
     handleStart,
+    handleToggleHeroReposition,
     handleToggleMuteSfx,
     handleTogglePause,
     selectedStage,
@@ -245,6 +293,7 @@ export default function App() {
         onSelectUnit={handleSelectUnit}
         onQuickRecruit={handleQuickRecruit}
         onStartCardDrag={handleStartCardDrag}
+        onToggleHeroReposition={handleToggleHeroReposition}
         onActivateSpell={handleActivateSpell}
         onTogglePause={handleTogglePause}
         onToggleMuteMusic={handleToggleMuteMusic}
@@ -254,7 +303,8 @@ export default function App() {
       <GameModals
         hud={hud}
         selectedStage={selectedStage}
-        onSelectStage={setSelectedStage}
+        onSelectHero={handleSelectHero}
+        onSelectStage={handleSelectStage}
         onStart={handleStart}
         onNextStage={handleNextStage}
         onResume={handleResume}

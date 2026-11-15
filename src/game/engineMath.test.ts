@@ -1,11 +1,14 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import {
+  STAGE_ROUTES,
   advanceEnemyAlongRoute,
   applyDamageToBase,
   applyDamageToEnemy,
   applyDamageToUnit,
+  applyHeroXpGain,
   applyMergeUpgrade,
+  buildArenaForStage,
   buildArenaSlots,
   canMergeUnits,
   circlesCollide,
@@ -19,6 +22,8 @@ import {
   findNearestEnemyInRange,
   findSlotAtPoint,
   formatSurvivalTime,
+  getHeroLevelFromXp,
+  getHeroStatsForLevel,
   getStageConfig,
   pointToSegmentDistance,
   pushEnemyBackAlongRoute,
@@ -28,32 +33,21 @@ import {
 import {
   DEFAULT_ARENA,
   EnemyEntity,
+  HERO_XP_THRESHOLDS,
+  HeroEntity,
+  MAX_HERO_LEVEL,
   MAX_UNIT_LEVEL,
   TOTAL_STAGES,
   UNIT_SPECS,
   UnitEntity,
 } from './types';
 
-test('computeViewportTransform adapts to both landscape and portrait without distortion', () => {
-  const landscape = computeViewportTransform(1280, 720, DEFAULT_ARENA);
-  assert.ok(landscape.scale > 0.8 && landscape.scale < 1);
-  assert.ok(landscape.offsetX > 0);
-
-  const portrait = computeViewportTransform(390, 844, DEFAULT_ARENA);
-  assert.ok(portrait.scale > 0.3 && portrait.scale < 0.45);
-  // Route center maps to horizontal & vertical center on portrait mobile
-  const screenCenterX = DEFAULT_ARENA.centerX * portrait.scale + portrait.offsetX;
-  const screenCenterY = DEFAULT_ARENA.centerY * portrait.scale + portrait.offsetY;
-  assert.equal(Math.round(screenCenterX), 195);
-  assert.equal(Math.round(screenCenterY), 422);
-});
-
 function makeEnemy(overrides: Partial<EnemyEntity> = {}): EnemyEntity {
   return {
     id: 1,
     kind: 'walker',
     x: 96,
-    y: 265,
+    y: 410,
     vx: 30,
     vy: 0,
     radius: 18,
@@ -66,6 +60,7 @@ function makeEnemy(overrides: Partial<EnemyEntity> = {}): EnemyEntity {
     attackAnim: 0,
     rewardEssence: 8,
     rewardScore: 15,
+    xpReward: 10,
     walkPhase: 0,
     distanceTraveled: 0,
     waypointIndex: 1,
@@ -89,9 +84,9 @@ function makeUnit(overrides: Partial<UnitEntity> = {}): UnitEntity {
   return {
     id: 10,
     kind: 'shield',
-    slotId: 's-4',
-    x: 385,
-    y: 345,
+    slotId: 's1-4',
+    x: 380,
+    y: 510,
     hp: spec.maxHp,
     maxHp: spec.maxHp,
     range: spec.range,
@@ -107,6 +102,101 @@ function makeUnit(overrides: Partial<UnitEntity> = {}): UnitEntity {
     ...overrides,
   };
 }
+
+test('computeViewportTransform adapts to both landscape and portrait without distortion', () => {
+  const landscape = computeViewportTransform(1280, 720, DEFAULT_ARENA);
+  assert.ok(landscape.scale > 0.8 && landscape.scale < 1);
+  assert.ok(landscape.offsetX > 0);
+
+  const portrait = computeViewportTransform(390, 844, DEFAULT_ARENA);
+  assert.ok(portrait.scale > 0.3 && portrait.scale < 0.45);
+  const screenCenterX = DEFAULT_ARENA.centerX * portrait.scale + portrait.offsetX;
+  const screenCenterY = DEFAULT_ARENA.centerY * portrait.scale + portrait.offsetY;
+  assert.equal(Math.round(screenCenterX), 195);
+  assert.equal(Math.round(screenCenterY), 422);
+});
+
+test('all 10 stages have distinct routes and non-overlapping slots clear of the road', () => {
+  assert.equal(STAGE_ROUTES.length, TOTAL_STAGES);
+
+  const routeSignatures = new Set<string>();
+  for (let stage = 1; stage <= TOTAL_STAGES; stage++) {
+    const arena = buildArenaForStage(stage);
+    const slots = buildArenaSlots(arena);
+    assert.ok(slots.length >= 12, `Stage ${stage} should have >= 12 tactical slots`);
+
+    const sig = arena.waypoints.map((w) => `${w.x},${w.y}`).join('->');
+    assert.equal(routeSignatures.has(sig), false, `Stage ${stage} repeated a route!`);
+    routeSignatures.add(sig);
+
+    for (const s of slots) {
+      let minRoadDist = Infinity;
+      for (let i = 0; i < arena.waypoints.length - 1; i++) {
+        const d = pointToSegmentDistance(
+          s.x,
+          s.y,
+          arena.waypoints[i].x,
+          arena.waypoints[i].y,
+          arena.waypoints[i + 1].x,
+          arena.waypoints[i + 1].y
+        );
+        if (d < minRoadDist) minRoadDist = d;
+      }
+      assert.ok(
+        minRoadDist >= arena.roadHalfWidth + 24,
+        `Stage ${stage} slot ${s.id} too close to road (${minRoadDist.toFixed(1)}px)`
+      );
+      assert.ok(s.x >= 90 && s.x <= 1080 && s.y >= 145 && s.y <= 665, `Stage ${stage} slot ${s.id} out of safe HUD bounds`);
+    }
+
+    for (let i = 0; i < slots.length; i++) {
+      for (let j = i + 1; j < slots.length; j++) {
+        const d = Math.hypot(slots[i].x - slots[j].x, slots[i].y - slots[j].y);
+        assert.ok(
+          d >= 70,
+          `Stage ${stage} slots ${slots[i].id} and ${slots[j].id} overlap (${d.toFixed(1)}px)`
+        );
+      }
+    }
+  }
+});
+
+test('Hero XP progression scales level, attack power, range, and caps at MAX_HERO_LEVEL', () => {
+  assert.equal(getHeroLevelFromXp(0), 1);
+  assert.equal(getHeroLevelFromXp(HERO_XP_THRESHOLDS[1]), 2);
+  assert.equal(getHeroLevelFromXp(9999), MAX_HERO_LEVEL);
+
+  const stats1 = getHeroStatsForLevel('archer', 1);
+  const stats4 = getHeroStatsForLevel('archer', 4);
+  assert.ok(stats4.damage > stats1.damage);
+  assert.ok(stats4.cooldown < stats1.cooldown);
+  assert.ok(stats4.range > stats1.range);
+
+  const hero: HeroEntity = {
+    heroClass: 'bomber',
+    slotId: 's1-5',
+    x: 545,
+    y: 295,
+    level: 1,
+    xp: 0,
+    kills: 0,
+    ...getHeroStatsForLevel('bomber', 1),
+    cooldownTimer: 0,
+    facingAngle: 0,
+    attackAnim: 0,
+    recoil: 0,
+    levelUpFlash: 0,
+  };
+
+  const res = applyHeroXpGain(hero, HERO_XP_THRESHOLDS[1] + 5);
+  assert.equal(res.leveledUp, true);
+  assert.equal(res.newLevel, 2);
+  assert.ok(hero.blastRadius > getHeroStatsForLevel('bomber', 1).blastRadius);
+
+  const maxRes = applyHeroXpGain(hero, 1000);
+  assert.equal(maxRes.isMaxReached, true);
+  assert.equal(hero.level, MAX_HERO_LEVEL);
+});
 
 test('getStageConfig scales difficulty from Stage 1 to Stage 10 and flags final wave boss', () => {
   const s1 = getStageConfig(1);
@@ -133,33 +223,9 @@ test('formatSurvivalTime formats elapsed seconds into MM:SS', () => {
   assert.equal(formatSurvivalTime(125.9), '02:05');
 });
 
-test('buildArenaSlots places roadside tactical pads cleanly off the route and non-overlapping', () => {
-  const slots = buildArenaSlots(DEFAULT_ARENA);
-  assert.equal(slots.length, 15);
-
-  const wps = DEFAULT_ARENA.waypoints;
-  for (const s of slots) {
-    let minRoadDist = Infinity;
-    for (let i = 0; i < wps.length - 1; i++) {
-      const d = pointToSegmentDistance(s.x, s.y, wps[i].x, wps[i].y, wps[i + 1].x, wps[i + 1].y);
-      if (d < minRoadDist) minRoadDist = d;
-    }
-    assert.ok(
-      minRoadDist >= DEFAULT_ARENA.roadHalfWidth + 24,
-      `Slot ${s.id} too close to road (${minRoadDist.toFixed(1)}px)`
-    );
-  }
-
-  for (let i = 0; i < slots.length; i++) {
-    for (let j = i + 1; j < slots.length; j++) {
-      const d = Math.hypot(slots[i].x - slots[j].x, slots[i].y - slots[j].y);
-      assert.ok(d >= 72, `Slots ${slots[i].id} and ${slots[j].id} overlap (${d.toFixed(1)}px)`);
-    }
-  }
-});
-
 test('computeRouteSpawnPoint and advanceEnemyAlongRoute march enemies from portal to castle', () => {
-  const wps = DEFAULT_ARENA.waypoints;
+  const arena = buildArenaForStage(3);
+  const wps = arena.waypoints;
   const totalLen = computeRouteTotalLength(wps);
   const spawn = computeRouteSpawnPoint(wps, 0);
   assert.equal(Math.round(spawn.x), wps[0].x);
@@ -170,14 +236,14 @@ test('computeRouteSpawnPoint and advanceEnemyAlongRoute march enemies from porta
   assert.equal(step1.reachedCastle, false);
   assert.ok(enemy.pathProgress > 0 && enemy.pathProgress < 0.25);
 
-  // Advance enough to reach the Castle
   const stepFinal = advanceEnemyAlongRoute(enemy, wps, totalLen + 200, 40, totalLen);
   assert.equal(stepFinal.reachedCastle, true);
   assert.equal(enemy.pathProgress, 1);
 });
 
 test('pushEnemyBackAlongRoute moves enemies backward along route segments without leaving road', () => {
-  const wps = DEFAULT_ARENA.waypoints;
+  const arena = buildArenaForStage(2);
+  const wps = arena.waypoints;
   const totalLen = computeRouteTotalLength(wps);
   const enemy = makeEnemy({ x: wps[0].x, y: wps[0].y, waypointIndex: 1 });
   advanceEnemyAlongRoute(enemy, wps, 350, 40, totalLen);
@@ -305,7 +371,7 @@ test('computeWaveConfig scales enemy count and spawn pace smoothly', () => {
 });
 
 test('findSlotAtPoint resolves clicked slot coordinates cleanly', () => {
-  const slots = buildArenaSlots(DEFAULT_ARENA);
+  const slots = buildArenaSlots(buildArenaForStage(1));
   const target = slots[0];
   const found = findSlotAtPoint(target.x + 5, target.y - 4, slots);
   assert.equal(found?.id, target.id);

@@ -1,5 +1,7 @@
 export type GamePhase = 'title' | 'playing' | 'paused' | 'victory' | 'gameover';
 
+export type HeroClass = 'archer' | 'swordsman' | 'bomber';
+
 export type UnitKind = 'scout' | 'shield' | 'frog';
 
 export type EnemyKind = 'walker' | 'shielded' | 'brute' | 'boss';
@@ -8,17 +10,42 @@ export type SpellKind = 'blade' | 'shockwave' | 'overcharge';
 
 export type ParticleKind = 'circle' | 'smoke' | 'grass' | 'spark';
 
+export type RewardTone = 'gold' | 'electric' | 'crimson';
+
 export const MAX_UNIT_LEVEL = 4;
+export const MAX_HERO_LEVEL = 6;
 export const TOTAL_STAGES = 10;
+
+export const HERO_XP_THRESHOLDS: ReadonlyArray<number> = [0, 45, 110, 200, 320, 480];
 
 export interface RouteWaypoint {
   x: number;
   y: number;
 }
 
+export interface SlotCoord {
+  id: string;
+  x: number;
+  y: number;
+  zone: number;
+  angle: number;
+}
+
+export interface StageRouteDefinition {
+  stage: number;
+  title: string;
+  routeArchetype: string;
+  waypoints: ReadonlyArray<RouteWaypoint>;
+  castleX: number;
+  castleY: number;
+  slots: ReadonlyArray<SlotCoord>;
+  heroStartSlotId: string;
+}
+
 export interface StageConfig {
   stage: number;
   title: string;
+  routeArchetype: string;
   totalWaves: number;
   baseEnemiesPerWave: number;
   hpMultiplier: number;
@@ -28,6 +55,7 @@ export interface StageConfig {
 }
 
 export interface ArenaConfig {
+  stage: number;
   worldWidth: number;
   worldHeight: number;
   centerX: number;
@@ -47,6 +75,47 @@ export interface ArenaSlot {
   angle: number;
   radius: number;
   unitId: number | null;
+  hasHero: boolean;
+}
+
+export interface HeroSpec {
+  heroClass: HeroClass;
+  name: string;
+  title: string;
+  shortRole: string;
+  description: string;
+  range: number;
+  damage: number;
+  cooldown: number;
+  critChance: number;
+  blastRadius: number;
+  cleaveHalfAngle: number;
+  color: string;
+  accentColor: string;
+  glowColor: string;
+  statPower: number;
+  statSpeed: number;
+  statArea: number;
+}
+
+export interface HeroEntity {
+  heroClass: HeroClass;
+  slotId: string;
+  x: number;
+  y: number;
+  level: number;
+  xp: number;
+  kills: number;
+  range: number;
+  damage: number;
+  cooldown: number;
+  cooldownTimer: number;
+  critChance: number;
+  blastRadius: number;
+  facingAngle: number;
+  attackAnim: number;
+  recoil: number;
+  levelUpFlash: number;
 }
 
 export interface UnitSpec {
@@ -102,6 +171,7 @@ export interface EnemyEntity {
   attackAnim: number;
   rewardEssence: number;
   rewardScore: number;
+  xpReward: number;
   walkPhase: number;
   distanceTraveled: number;
   waypointIndex: number;
@@ -132,6 +202,24 @@ export interface ProjectileEntity {
   targetEnemyId: number;
   life: number;
   isShockwave: boolean;
+  isHeroAttack?: boolean;
+  isBomb?: boolean;
+  blastRadius?: number;
+  startX?: number;
+  startY?: number;
+  targetX?: number;
+  targetY?: number;
+  arcDuration?: number;
+  arcElapsed?: number;
+}
+
+export interface ExplosionEffect {
+  x: number;
+  y: number;
+  radius: number;
+  life: number;
+  maxLife: number;
+  color: string;
 }
 
 export interface SlashEffect {
@@ -162,6 +250,7 @@ export interface ShockwaveRingEffect {
   maxRadius: number;
   life: number;
   maxLife: number;
+  color?: string;
 }
 
 export interface HordeWarningIndicator {
@@ -203,8 +292,17 @@ export interface FloatingText {
   isCrit?: boolean;
 }
 
+export interface RewardBanner {
+  id: number;
+  text: string;
+  subtext?: string;
+  tone: RewardTone;
+  life: number;
+  maxLife: number;
+}
+
 export interface DragState {
-  source: 'unit' | 'card';
+  source: 'unit' | 'card' | 'hero';
   unitId?: number;
   fromSlotId?: string;
   kind: UnitKind;
@@ -226,6 +324,8 @@ export interface SpellState {
 export interface HudSnapshot {
   phase: GamePhase;
   stage: number;
+  routeArchetype: string;
+  stageTitle: string;
   totalWavesInStage: number;
   highestUnlockedStage: number;
   baseHp: number;
@@ -238,10 +338,19 @@ export interface HudSnapshot {
   wave: number;
   kills: number;
   survivalSeconds: number;
+  selectedHeroClass: HeroClass;
+  heroLevel: number;
+  heroXp: number;
+  heroCurrentLevelXp: number;
+  heroNextLevelXp: number;
+  heroKills: number;
+  heroRepositionMode: boolean;
   selectedUnit: UnitKind;
   unitCount: number;
   maxUnitLevelReached: number;
   mergesPerformed: number;
+  comboCount: number;
+  activeBanner: RewardBanner | null;
   hoveredSlotId: string | null;
   mutedMusic: boolean;
   mutedSfx: boolean;
@@ -252,42 +361,81 @@ export interface HudSnapshot {
   bossActive: boolean;
 }
 
-/**
- * Smooth S-curve path from the West Invasion Portal (x=100, y=260)
- * through three tactical switchbacks to the East Castle Gate (x=1065, y=455).
- */
+export const HERO_SPECS: Record<HeroClass, HeroSpec> = {
+  archer: {
+    heroClass: 'archer',
+    name: 'Arqueiro',
+    title: 'Mestre da Precisão',
+    shortRole: 'Alta velocidade à distância',
+    description: 'Disparos elétricos velozes, longo alcance e rajadas múltiplas ao evoluir.',
+    range: 345,
+    damage: 24,
+    cooldown: 0.42,
+    critChance: 0.28,
+    blastRadius: 0,
+    cleaveHalfAngle: 0,
+    color: '#00D4FF',
+    accentColor: '#FACC15',
+    glowColor: 'rgba(0, 212, 255, 0.45)',
+    statPower: 78,
+    statSpeed: 98,
+    statArea: 42,
+  },
+  swordsman: {
+    heroClass: 'swordsman',
+    name: 'Espadachim',
+    title: 'Lâmina Carmesim',
+    shortRole: 'Dano corpo a corpo massivo',
+    description: 'Golpes em arco devastadores com dano crítico alto e recuo de inimigos próximos.',
+    range: 195,
+    damage: 58,
+    cooldown: 0.72,
+    critChance: 0.34,
+    blastRadius: 0,
+    cleaveHalfAngle: Math.PI * 0.68,
+    color: '#FF2E4C',
+    accentColor: '#FACC15',
+    glowColor: 'rgba(255, 46, 76, 0.45)',
+    statPower: 98,
+    statSpeed: 74,
+    statArea: 76,
+  },
+  bomber: {
+    heroClass: 'bomber',
+    name: 'Bombardeiro',
+    title: 'Artífice Explosivo',
+    shortRole: 'Explosões em área de grupo',
+    description: 'Lança bombas de impacto que pulverizam grupos inteiros na rota.',
+    range: 290,
+    damage: 44,
+    cooldown: 1.08,
+    critChance: 0.22,
+    blastRadius: 102,
+    cleaveHalfAngle: 0,
+    color: '#F59E0B',
+    accentColor: '#EF4444',
+    glowColor: 'rgba(250, 204, 21, 0.45)',
+    statPower: 90,
+    statSpeed: 56,
+    statArea: 98,
+  },
+};
+
 export const DEFAULT_ROUTE_WAYPOINTS: ReadonlyArray<RouteWaypoint> = [
-  { x: 96, y: 265 },
-  { x: 245, y: 265 },
-  { x: 285, y: 285 },
-  { x: 295, y: 330 },
-  { x: 295, y: 500 },
-  { x: 315, y: 545 },
-  { x: 365, y: 560 },
-  { x: 515, y: 560 },
-  { x: 560, y: 540 },
-  { x: 575, y: 495 },
-  { x: 575, y: 295 },
-  { x: 595, y: 250 },
-  { x: 645, y: 235 },
-  { x: 785, y: 235 },
-  { x: 830, y: 255 },
-  { x: 845, y: 300 },
-  { x: 845, y: 490 },
-  { x: 865, y: 535 },
-  { x: 915, y: 550 },
-  { x: 1015, y: 540 },
-  { x: 1065, y: 495 },
-  { x: 1065, y: 445 },
+  { x: 96, y: 410 },
+  { x: 460, y: 410 },
+  { x: 640, y: 375 },
+  { x: 1045, y: 410 },
 ];
 
 export const DEFAULT_ARENA: ArenaConfig = {
+  stage: 1,
   worldWidth: 1200,
   worldHeight: 820,
   centerX: 580,
   centerY: 410,
-  castleX: 1065,
-  castleY: 415,
+  castleX: 1045,
+  castleY: 410,
   castleRadius: 42,
   roadHalfWidth: 30,
   waypoints: DEFAULT_ROUTE_WAYPOINTS,
@@ -300,20 +448,20 @@ export const SPELL_SPECS: Record<
   blade: {
     name: 'Lâmina Giratória',
     hotkey: 'Q',
-    cooldown: 12,
+    cooldown: 11,
     description: 'Corte em área no alvo',
   },
   shockwave: {
     name: 'Onda de Choque',
     hotkey: 'W',
-    cooldown: 15,
+    cooldown: 14,
     description: 'Recua toda a horda',
   },
   overcharge: {
     name: 'SuperCarga',
     hotkey: 'E',
-    cooldown: 20,
-    description: '+Essência por 10s',
+    cooldown: 18,
+    description: '+50% Essência e XP',
   },
 };
 
@@ -326,11 +474,11 @@ export const UNIT_SPECS: Record<UnitKind, UnitSpec> = {
     cost: 30,
     maxHp: 75,
     range: 255,
-    damage: 14,
-    cooldown: 0.62,
+    damage: 15,
+    cooldown: 0.6,
     critChance: 0.18,
-    color: '#3B82F6',
-    accentColor: '#EF4444',
+    color: '#00D4FF',
+    accentColor: '#FF2E4C',
     hotkey: '1',
   },
   shield: {
@@ -340,10 +488,10 @@ export const UNIT_SPECS: Record<UnitKind, UnitSpec> = {
     role: 'Onda de escudo & impacto',
     cost: 45,
     maxHp: 175,
-    range: 185,
-    damage: 24,
-    cooldown: 1.0,
-    critChance: 0.15,
+    range: 195,
+    damage: 25,
+    cooldown: 0.96,
+    critChance: 0.16,
     color: '#2563EB',
     accentColor: '#FACC15',
     hotkey: '2',
@@ -355,12 +503,12 @@ export const UNIT_SPECS: Record<UnitKind, UnitSpec> = {
     role: 'Corte esmeralda em área',
     cost: 70,
     maxHp: 130,
-    range: 170,
-    damage: 42,
-    cooldown: 0.84,
+    range: 175,
+    damage: 44,
+    cooldown: 0.82,
     critChance: 0.26,
     color: '#22C55E',
-    accentColor: '#2DD4BF',
+    accentColor: '#FACC15',
     hotkey: '3',
   },
 };

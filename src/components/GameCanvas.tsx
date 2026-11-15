@@ -85,7 +85,7 @@ export const GameCanvas: React.FC<GameCanvasProps> = ({
       const { scale, offsetX, offsetY, dpr } = transformRef.current;
       ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
 
-      ctx.fillStyle = '#4A8E29';
+      ctx.fillStyle = '#080D1A';
       ctx.fillRect(0, 0, canvas.width / dpr, canvas.height / dpr);
 
       ctx.save();
@@ -96,7 +96,8 @@ export const GameCanvas: React.FC<GameCanvasProps> = ({
 
       const snap = sim.getHudSnapshot();
       const cdKey = `${Math.ceil(snap.spellCooldowns.blade * 2)}|${Math.ceil(snap.spellCooldowns.shockwave * 2)}|${Math.ceil(snap.spellCooldowns.overcharge * 2)}|${snap.targetingSpell ?? ''}|${Math.ceil(snap.overchargeTimer * 2)}`;
-      const hudKey = `${snap.phase}|${snap.stage}|${snap.highestUnlockedStage}|${snap.baseHp}|${snap.baseLevel}|${snap.essence}|${snap.score}|${snap.wave}|${snap.kills}|${snap.selectedUnit}|${snap.unitCount}|${snap.mergesPerformed}|${snap.maxUnitLevelReached}|${snap.mutedMusic}|${snap.mutedSfx}|${snap.bossActive}|${cdKey}`;
+      const bannerId = snap.activeBanner ? snap.activeBanner.id : 0;
+      const hudKey = `${snap.phase}|${snap.stage}|${snap.highestUnlockedStage}|${snap.baseHp}|${snap.baseLevel}|${snap.essence}|${snap.score}|${snap.wave}|${snap.kills}|${snap.selectedHeroClass}|${snap.heroLevel}|${snap.heroXp}|${snap.heroKills}|${snap.heroRepositionMode}|${snap.selectedUnit}|${snap.unitCount}|${snap.mergesPerformed}|${snap.maxUnitLevelReached}|${snap.comboCount}|${bannerId}|${snap.mutedMusic}|${snap.mutedSfx}|${snap.bossActive}|${cdKey}`;
       if (hudKey !== lastHudKey) {
         lastHudKey = hudKey;
         onHudSyncRef.current(snap);
@@ -149,7 +150,7 @@ export const GameCanvas: React.FC<GameCanvasProps> = ({
   };
 
   return (
-    <div ref={containerRef} className="fixed inset-0 bg-[#4A8E29] touch-none select-none">
+    <div ref={containerRef} className="fixed inset-0 bg-[#080D1A] touch-none select-none">
       <canvas
         ref={canvasRef}
         data-testid="arena-canvas"

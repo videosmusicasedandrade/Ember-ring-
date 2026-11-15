@@ -3,7 +3,9 @@ import {
   advanceEnemyAlongRoute,
   applyDamageToBase,
   applyDamageToEnemy,
+  applyHeroXpGain,
   applyMergeUpgrade,
+  buildArenaForStage,
   buildArenaSlots,
   canMergeUnits,
   circlesCollide,
@@ -15,7 +17,10 @@ import {
   findEnemiesInSlashArc,
   findNearestEnemyInRange,
   findSlotAtPoint,
+  getHeroStatsForLevel,
+  getHeroXpBounds,
   getStageConfig,
+  getStageRouteDefinition,
   pushEnemyBackAlongRoute,
   rollCriticalHit,
   unlockNextStage,
@@ -28,13 +33,20 @@ import {
   DragState,
   EnemyEntity,
   EnemyKind,
+  ExplosionEffect,
   FloatingText,
   GamePhase,
+  HERO_SPECS,
+  HeroClass,
+  HeroEntity,
   HordeWarningIndicator,
   HudSnapshot,
+  MAX_HERO_LEVEL,
   Particle,
   ParticleKind,
   ProjectileEntity,
+  RewardBanner,
+  RewardTone,
   SPELL_SPECS,
   ShockwaveRingEffect,
   SlashEffect,
@@ -47,31 +59,39 @@ import {
   UnitKind,
 } from './types';
 
-const PARTICLE_POOL_SIZE = 320;
+const PARTICLE_POOL_SIZE = 340;
 
 export class GameSimulation {
-  public readonly arena: ArenaConfig = DEFAULT_ARENA;
-  public readonly routeTotalLength: number;
+  public arena: ArenaConfig = DEFAULT_ARENA;
+  public routeTotalLength = 0;
   public phase: GamePhase = 'title';
   public currentStage = 1;
+  public routeArchetype = 'Trilha Reta';
+  public stageTitle = 'Trilha da Clareira';
   public totalWavesInStage = 2;
   public highestUnlockedStage = 1;
+  public selectedHeroClass: HeroClass = 'archer';
+  public hero: HeroEntity;
+  public heroRepositionMode = false;
+
   public slots: ArenaSlot[] = [];
   public units: UnitEntity[] = [];
   public enemies: EnemyEntity[] = [];
   public projectiles: ProjectileEntity[] = [];
+  public explosions: ExplosionEffect[] = [];
   public slashes: SlashEffect[] = [];
   public spinningBlades: SpinningBladeHazard[] = [];
   public shockwaves: ShockwaveRingEffect[] = [];
   public hordeWarnings: HordeWarningIndicator[] = [];
   public floatingTexts: FloatingText[] = [];
+  public activeBanner: RewardBanner | null = null;
   public readonly particles: Particle[] = [];
   private particleCursor = 0;
 
   public baseHp = 100;
   public baseMaxHp = 100;
   public baseLevel = 1;
-  public essence = 100;
+  public essence = 110;
   public essenceCollected = 0;
   public score = 0;
   public bestScore = 0;
@@ -85,6 +105,12 @@ export class GameSimulation {
   public dragState: DragState | null = null;
   public mergesPerformed = 0;
   public maxUnitLevelReached = 1;
+
+  public comboCount = 0;
+  private comboTimer = 0;
+  private lastComboTier = 0;
+  private nextBannerId = 1;
+  private lastExcellenceBannerTime = -10;
 
   public spells: SpellState = {
     cooldowns: { blade: 0, shockwave: 0, overcharge: 0 },
@@ -112,13 +138,16 @@ export class GameSimulation {
   private isBossWave = false;
   private waveBossHp = 280;
   private bossSpawnedInWave = false;
-  private waveMix: Record<Exclude<EnemyKind, 'boss'>, number> = { walker: 0.7, shielded: 0.22, brute: 0.08 };
-  private surgeScheduleTimer = 3.2;
+  private waveMix: Record<Exclude<EnemyKind, 'boss'>, number> = {
+    walker: 0.72,
+    shielded: 0.2,
+    brute: 0.08,
+  };
+  private surgeScheduleTimer = 4.2;
   private overchargeTickTimer = 0;
   private lowHpAlarmTimer = 0;
 
   constructor() {
-    this.routeTotalLength = computeRouteTotalLength(this.arena.waypoints);
     for (let i = 0; i < PARTICLE_POOL_SIZE; i++) {
       this.particles.push({
         active: false,
@@ -139,19 +168,87 @@ export class GameSimulation {
     const saved = loadProgress();
     this.highestUnlockedStage = saved.highestUnlockedStage;
     this.bestScore = saved.bestScore;
-    this.resetWorld('title', 1);
+    this.selectedHeroClass = saved.selectedHeroClass;
+    this.hero = this.createHeroEntity(this.selectedHeroClass, 's1-5', 545, 295);
+    this.resetWorld('title', 1, this.selectedHeroClass);
   }
 
-  public resetWorld(targetPhase: GamePhase, stageNumber?: number) {
+  private createHeroEntity(heroClass: HeroClass, slotId: string, x: number, y: number): HeroEntity {
+    const stats = getHeroStatsForLevel(heroClass, 1);
+    return {
+      heroClass,
+      slotId,
+      x,
+      y,
+      level: 1,
+      xp: 0,
+      kills: 0,
+      range: stats.range,
+      damage: stats.damage,
+      cooldown: stats.cooldown,
+      cooldownTimer: 0.1,
+      critChance: stats.critChance,
+      blastRadius: stats.blastRadius,
+      facingAngle: 0,
+      attackAnim: 0,
+      recoil: 0,
+      levelUpFlash: 0,
+    };
+  }
+
+  public setHeroClass(heroClass: HeroClass) {
+    this.selectedHeroClass = heroClass;
+    const stats = getHeroStatsForLevel(heroClass, 1);
+    this.hero.heroClass = heroClass;
+    this.hero.damage = stats.damage;
+    this.hero.cooldown = stats.cooldown;
+    this.hero.range = stats.range;
+    this.hero.critChance = stats.critChance;
+    this.hero.blastRadius = stats.blastRadius;
+    saveProgress({
+      highestUnlockedStage: this.highestUnlockedStage,
+      bestScore: this.bestScore,
+      selectedHeroClass: this.selectedHeroClass,
+    });
+  }
+
+  public toggleHeroRepositionMode() {
+    if (this.phase !== 'playing') return;
+    this.spells.targetingSpell = null;
+    this.heroRepositionMode = !this.heroRepositionMode;
+  }
+
+  private triggerRewardBanner(text: string, subtext: string | undefined, tone: RewardTone, duration = 1.7) {
+    this.activeBanner = {
+      id: this.nextBannerId++,
+      text,
+      subtext,
+      tone,
+      life: duration,
+      maxLife: duration,
+    };
+  }
+
+  public resetWorld(targetPhase: GamePhase, stageNumber?: number, heroClassOverride?: HeroClass) {
     const saved = loadProgress();
     this.highestUnlockedStage = Math.max(this.highestUnlockedStage, saved.highestUnlockedStage);
     this.bestScore = Math.max(this.bestScore, saved.bestScore);
+
+    if (heroClassOverride) {
+      this.selectedHeroClass = heroClassOverride;
+    }
 
     this.currentStage = Math.max(
       1,
       Math.min(TOTAL_STAGES, stageNumber ?? this.currentStage)
     );
+    this.arena = buildArenaForStage(this.currentStage);
+    this.routeTotalLength = computeRouteTotalLength(this.arena.waypoints);
+
+    const routeDef = getStageRouteDefinition(this.currentStage);
     const stageCfg = getStageConfig(this.currentStage);
+    this.routeArchetype = stageCfg.routeArchetype;
+    this.stageTitle = stageCfg.title;
     this.totalWavesInStage = stageCfg.totalWaves;
 
     this.phase = targetPhase;
@@ -159,17 +256,19 @@ export class GameSimulation {
     this.units = [];
     this.enemies = [];
     this.projectiles = [];
+    this.explosions = [];
     this.slashes = [];
     this.spinningBlades = [];
     this.shockwaves = [];
     this.hordeWarnings = [];
     this.floatingTexts = [];
+    this.activeBanner = null;
     for (const p of this.particles) p.active = false;
 
     this.baseHp = 100;
     this.baseMaxHp = 100;
     this.baseLevel = 1;
-    this.essence = 100;
+    this.essence = 110;
     this.essenceCollected = 0;
     this.score = 0;
     this.wave = 1;
@@ -178,13 +277,17 @@ export class GameSimulation {
     this.selectedUnit = 'scout';
     this.hoveredSlotId = null;
     this.dragState = null;
+    this.heroRepositionMode = false;
     this.mergesPerformed = 0;
     this.maxUnitLevelReached = 1;
+    this.comboCount = 0;
+    this.comboTimer = 0;
+    this.lastComboTier = 0;
     this.hitstopTimer = 0;
     this.cameraTrauma = 0;
     this.baseHitFlash = 0;
     this.nextEntityId = 1;
-    this.surgeScheduleTimer = 4.2;
+    this.surgeScheduleTimer = 4.6;
     this.overchargeTickTimer = 0;
     this.lowHpAlarmTimer = 0;
     this.bossSpawnedInWave = false;
@@ -200,33 +303,57 @@ export class GameSimulation {
       overchargeTimer: 0,
     };
 
-    // Deploy strategic starter defenders along the route bends
-    this.deployUnitToSlotId('s-2', 'scout', true);
-    this.deployUnitToSlotId('s-4', 'shield', true);
-    this.deployUnitToSlotId('s-5', 'shield', true);
-    this.deployUnitToSlotId('s-10', 'frog', true);
+    // Place Chosen Main Hero on the stage's prime tactical slot
+    const heroSlot =
+      this.slots.find((s) => s.id === routeDef.heroStartSlotId) ??
+      this.slots[Math.floor(this.slots.length / 2)] ??
+      this.slots[0];
+    this.hero = this.createHeroEntity(this.selectedHeroClass, heroSlot.id, heroSlot.x, heroSlot.y);
+    heroSlot.hasHero = true;
+
+    // Place 2 tactical starter support units at early & late bends
+    const earlyEmpty = this.slots.find((s) => !s.hasHero && s.unitId === null);
+    if (earlyEmpty) this.deployUnitToSlotId(earlyEmpty.id, 'scout', true);
+
+    const lateEmpty = [...this.slots].reverse().find((s) => !s.hasHero && s.unitId === null);
+    if (lateEmpty) this.deployUnitToSlotId(lateEmpty.id, 'shield', true);
 
     this.startWave(1);
 
     if (targetPhase === 'playing') {
-      // Spawn initial vanguard along early path so combat begins cleanly without crowding
-      this.spawnEnemyAlongRoute('walker', 0.14);
-      this.spawnEnemyAlongRoute('shielded', 0.08);
-      this.spawnEnemyAlongRoute('walker', 0.02);
-      this.waveRemainingToSpawn = Math.max(2, this.waveRemainingToSpawn - 3);
-      this.queueHordeWarning(3, false);
+      // Initial vanguard spaced cleanly on early route
+      this.spawnEnemyAlongRoute('walker', 0.12);
+      this.spawnEnemyAlongRoute('walker', 0.04);
+      this.waveRemainingToSpawn = Math.max(3, this.waveRemainingToSpawn - 2);
+      this.queueHordeWarning(2, false);
+
+      if (this.currentStage >= 2) {
+        this.triggerRewardBanner(
+          'NOVA ROTA DESBLOQUEADA!',
+          `Fase ${this.currentStage} · ${this.routeArchetype}`,
+          'electric',
+          2.0
+        );
+      } else {
+        this.triggerRewardBanner(
+          `${HERO_SPECS[this.selectedHeroClass].name.toUpperCase()} EM CAMPO!`,
+          `${this.stageTitle} · ${this.routeArchetype}`,
+          'gold',
+          1.7
+        );
+      }
     }
   }
 
   private queueHordeWarning(spawnCount: number, isBoss = false) {
-    const start = this.arena.waypoints[0] ?? { x: 96, y: 265 };
-    const next = this.arena.waypoints[1] ?? { x: 245, y: 265 };
+    const start = this.arena.waypoints[0] ?? { x: 96, y: 410 };
+    const next = this.arena.waypoints[1] ?? { x: 380, y: 410 };
     this.hordeWarnings.push({
       x: start.x,
       y: start.y,
       angle: Math.atan2(next.y - start.y, next.x - start.x),
-      timer: isBoss ? 2.4 : 1.9,
-      maxTimer: isBoss ? 2.4 : 1.9,
+      timer: isBoss ? 2.3 : 1.8,
+      maxTimer: isBoss ? 2.3 : 1.8,
       spawnCount,
       spawned: false,
       isBoss,
@@ -263,7 +390,7 @@ export class GameSimulation {
         vy: -28,
         text: `Castelo Nv.${this.baseLevel}!`,
         color: '#FDE047',
-        scale: 1.22,
+        scale: 1.2,
         life: 1.15,
         maxLife: 1.15,
       });
@@ -273,6 +400,8 @@ export class GameSimulation {
   public activateSpell(kind: SpellKind): boolean {
     if (this.phase !== 'playing') return false;
     if (this.spells.cooldowns[kind] > 0) return false;
+
+    this.heroRepositionMode = false;
 
     if (kind === 'blade') {
       this.spells.targetingSpell = this.spells.targetingSpell === 'blade' ? null : 'blade';
@@ -294,6 +423,7 @@ export class GameSimulation {
 
   public cancelSpellTargeting() {
     this.spells.targetingSpell = null;
+    this.heroRepositionMode = false;
   }
 
   private castSpinningBlade(x: number, y: number) {
@@ -303,10 +433,10 @@ export class GameSimulation {
     this.spinningBlades.push({
       x,
       y,
-      radius: 122,
-      damagePerTick: 28 + (this.baseLevel - 1) * 8,
-      life: 2.6,
-      maxLife: 2.6,
+      radius: 126,
+      damagePerTick: 30 + (this.hero.level - 1) * 9,
+      life: 2.7,
+      maxLife: 2.7,
       tickTimer: 0,
       rotation: 0,
     });
@@ -314,15 +444,15 @@ export class GameSimulation {
     this.cameraTrauma = Math.min(1, this.cameraTrauma + 0.42);
     this.hitstopTimer = 0.04;
     soundEngine.playSpellBlade();
-    this.spawnTypedParticles(x, y, 16, 'grass', '#84CC16', 170, 0.5);
-    this.spawnTypedParticles(x, y, 14, 'spark', '#6EE7B7', 210, 0.42);
+    this.spawnTypedParticles(x, y, 16, 'spark', '#00D4FF', 195, 0.48);
+    this.spawnTypedParticles(x, y, 14, 'spark', '#FACC15', 220, 0.42);
     this.floatingTexts.push({
       x,
       y: y - 34,
       vy: -30,
       text: 'Lâmina Giratória!',
-      color: '#6EE7B7',
-      scale: 1.15,
+      color: '#00D4FF',
+      scale: 1.18,
       life: 0.9,
       maxLife: 0.9,
     });
@@ -336,34 +466,26 @@ export class GameSimulation {
       x: this.arena.castleX,
       y: this.arena.castleY,
       currentRadius: this.arena.castleRadius,
-      maxRadius: 960,
+      maxRadius: 980,
       life: 0.65,
       maxLife: 0.65,
+      color: '#00D4FF',
     });
 
     for (const enemy of this.enemies) {
       if (enemy.isDead) continue;
-      const pushDist = enemy.kind === 'boss' ? 75 : 145;
+      const pushDist = enemy.kind === 'boss' ? 80 : 155;
       pushEnemyBackAlongRoute(enemy, this.arena.waypoints, pushDist, this.routeTotalLength);
-      enemy.stunTimer = Math.max(enemy.stunTimer, 0.65);
-      this.handleEnemyDamaged(enemy, 18, 0, 0, true, false);
+      enemy.stunTimer = Math.max(enemy.stunTimer, 0.7);
+      this.handleEnemyDamaged(enemy, 22, 0, 0, true, false, true);
     }
 
     this.cameraTrauma = Math.min(1, this.cameraTrauma + 0.62);
     this.hitstopTimer = 0.05;
     soundEngine.playSpellShockwave();
-    this.spawnTypedParticles(this.arena.castleX, this.arena.castleY, 22, 'spark', '#7DD3FC', 240, 0.52);
+    this.spawnTypedParticles(this.arena.castleX, this.arena.castleY, 24, 'spark', '#00D4FF', 250, 0.52);
     this.spawnTypedParticles(this.arena.castleX, this.arena.castleY, 16, 'smoke', '#E2E8F0', 140, 0.6);
-    this.floatingTexts.push({
-      x: this.arena.castleX - 40,
-      y: this.arena.castleY - 78,
-      vy: -30,
-      text: 'Onda de Choque!',
-      color: '#7DD3FC',
-      scale: 1.2,
-      life: 0.9,
-      maxLife: 0.9,
-    });
+    this.triggerRewardBanner('ONDA DE CHOQUE!', 'Horda empurrada para trás', 'electric', 1.45);
   }
 
   private castOvercharge() {
@@ -372,24 +494,15 @@ export class GameSimulation {
     this.spells.overchargeTimer = 10;
     this.overchargeTickTimer = 0.5;
 
-    this.cameraTrauma = Math.min(1, this.cameraTrauma + 0.25);
+    this.cameraTrauma = Math.min(1, this.cameraTrauma + 0.28);
     soundEngine.playSpellOvercharge();
-    this.spawnTypedParticles(this.arena.castleX, this.arena.castleY - 12, 20, 'spark', '#FDE047', 165, 0.55);
-    this.floatingTexts.push({
-      x: this.arena.castleX - 24,
-      y: this.arena.castleY - 78,
-      vy: -32,
-      text: 'SuperCarga 10s!',
-      color: '#FDE047',
-      scale: 1.2,
-      life: 1.0,
-      maxLife: 1.0,
-    });
+    this.spawnTypedParticles(this.hero.x, this.hero.y, 22, 'spark', '#FACC15', 180, 0.55);
+    this.triggerRewardBanner('SUPERCARGA ATIVA!', '+50% Essência e XP por 10s', 'gold', 1.5);
   }
 
   public deployUnitToSlotId(slotId: string, kind: UnitKind, free = false): boolean {
     const slot = this.slots.find((s) => s.id === slotId);
-    if (!slot || slot.unitId !== null) return false;
+    if (!slot || slot.unitId !== null || slot.hasHero) return false;
     const spec = UNIT_SPECS[kind];
     if (!free && this.essence < spec.cost) return false;
 
@@ -422,8 +535,7 @@ export class GameSimulation {
     this.units.push(unit);
 
     if (!free) {
-      this.spawnTypedParticles(slot.x, slot.y, 10, 'grass', '#84CC16', 95, 0.4);
-      this.spawnParticles(slot.x, slot.y, 8, spec.accentColor, 95, 0.4);
+      this.spawnTypedParticles(slot.x, slot.y, 10, 'spark', spec.color, 110, 0.38);
       this.floatingTexts.push({
         x: slot.x,
         y: slot.y - 28,
@@ -438,17 +550,73 @@ export class GameSimulation {
     return true;
   }
 
+  private moveHeroToSlot(targetSlot: ArenaSlot): boolean {
+    const oldSlot = this.slots.find((s) => s.id === this.hero.slotId);
+    if (!oldSlot || oldSlot.id === targetSlot.id) {
+      this.heroRepositionMode = false;
+      return false;
+    }
+
+    if (targetSlot.unitId !== null) {
+      // Clean swap between Hero and occupying troop!
+      const occupant = this.units.find((u) => u.id === targetSlot.unitId);
+      if (occupant) {
+        oldSlot.hasHero = false;
+        oldSlot.unitId = occupant.id;
+        occupant.slotId = oldSlot.id;
+        occupant.x = oldSlot.x;
+        occupant.y = oldSlot.y;
+
+        targetSlot.unitId = null;
+        targetSlot.hasHero = true;
+        this.hero.slotId = targetSlot.id;
+        this.hero.x = targetSlot.x;
+        this.hero.y = targetSlot.y;
+      }
+    } else {
+      oldSlot.hasHero = false;
+      targetSlot.hasHero = true;
+      this.hero.slotId = targetSlot.id;
+      this.hero.x = targetSlot.x;
+      this.hero.y = targetSlot.y;
+    }
+
+    this.heroRepositionMode = false;
+    soundEngine.playDeploy();
+    this.spawnTypedParticles(
+      targetSlot.x,
+      targetSlot.y,
+      14,
+      'spark',
+      HERO_SPECS[this.hero.heroClass].color,
+      135,
+      0.42
+    );
+    this.floatingTexts.push({
+      x: targetSlot.x,
+      y: targetSlot.y - 34,
+      vy: -30,
+      text: `${HERO_SPECS[this.hero.heroClass].name}!`,
+      color: '#FACC15',
+      scale: 1.05,
+      life: 0.8,
+      maxLife: 0.8,
+    });
+    return true;
+  }
+
   public quickRecruitUnit(kind: UnitKind): boolean {
     if (this.phase !== 'playing') return false;
+    this.heroRepositionMode = false;
     this.selectedUnit = kind;
-    const freeSlot = this.slots.find((s) => s.unitId === null);
+    const freeSlot = this.slots.find((s) => !s.hasHero && s.unitId === null);
     if (!freeSlot) {
       this.floatingTexts.push({
         x: this.arena.centerX,
         y: this.arena.centerY - 40,
         vy: -24,
-        text: 'Mapa cheio! Funda tropas',
-        color: '#FDE047',
+        text: 'Mapa cheio! Funda tropas iguais',
+        color: '#FACC15',
         scale: 0.95,
         life: 0.9,
         maxLife: 0.9,
@@ -462,7 +630,7 @@ export class GameSimulation {
         y: freeSlot.y - 24,
         vy: -24,
         text: 'Sem essência',
-        color: '#FCA5A5',
+        color: '#FF2E4C',
         scale: 0.85,
         life: 0.7,
         maxLife: 0.7,
@@ -474,6 +642,7 @@ export class GameSimulation {
   public startCardDrag(kind: UnitKind, worldX: number, worldY: number) {
     if (this.phase !== 'playing') return;
     this.spells.targetingSpell = null;
+    this.heroRepositionMode = false;
     this.selectedUnit = kind;
     this.dragState = {
       source: 'card',
@@ -497,7 +666,29 @@ export class GameSimulation {
     }
 
     const slot = findSlotAtPoint(worldX, worldY, this.slots);
-    if (!slot) return false;
+    if (!slot) {
+      this.heroRepositionMode = false;
+      return false;
+    }
+
+    if (this.heroRepositionMode) {
+      return this.moveHeroToSlot(slot);
+    }
+
+    if (slot.hasHero) {
+      this.dragState = {
+        source: 'hero',
+        fromSlotId: slot.id,
+        kind: 'scout',
+        level: this.hero.level,
+        worldX,
+        worldY,
+        startedAtX: worldX,
+        startedAtY: worldY,
+        hasMoved: false,
+      };
+      return true;
+    }
 
     if (slot.unitId !== null) {
       const unit = this.units.find((u) => u.id === slot.unitId);
@@ -525,7 +716,7 @@ export class GameSimulation {
         y: slot.y - 24,
         vy: -24,
         text: 'Sem essência',
-        color: '#FCA5A5',
+        color: '#FF2E4C',
         scale: 0.85,
         life: 0.7,
         maxLife: 0.7,
@@ -561,8 +752,16 @@ export class GameSimulation {
     const targetSlot = findSlotAtPoint(worldX, worldY, this.slots);
     if (!targetSlot) return false;
 
+    if (drag.source === 'hero') {
+      if (!drag.hasMoved) {
+        this.heroRepositionMode = true;
+        return true;
+      }
+      return this.moveHeroToSlot(targetSlot);
+    }
+
     if (drag.source === 'card') {
-      if (targetSlot.unitId === null) {
+      if (targetSlot.unitId === null && !targetSlot.hasHero) {
         const ok = this.deployUnitToSlotId(targetSlot.id, drag.kind, false);
         if (!ok) {
           this.floatingTexts.push({
@@ -570,7 +769,7 @@ export class GameSimulation {
             y: targetSlot.y - 24,
             vy: -24,
             text: 'Sem essência',
-            color: '#FCA5A5',
+            color: '#FF2E4C',
             scale: 0.85,
             life: 0.7,
             maxLife: 0.7,
@@ -582,7 +781,7 @@ export class GameSimulation {
     }
 
     if (!drag.hasMoved || !drag.unitId || !drag.fromSlotId) return false;
-    if (targetSlot.id === drag.fromSlotId) return false;
+    if (targetSlot.id === drag.fromSlotId || targetSlot.hasHero) return false;
 
     const fromSlot = this.slots.find((s) => s.id === drag.fromSlotId);
     const draggedUnit = this.units.find((u) => u.id === drag.unitId);
@@ -595,7 +794,7 @@ export class GameSimulation {
       draggedUnit.x = targetSlot.x;
       draggedUnit.y = targetSlot.y;
       soundEngine.playDeploy();
-      this.spawnTypedParticles(targetSlot.x, targetSlot.y, 8, 'grass', '#BEF264', 80, 0.32);
+      this.spawnTypedParticles(targetSlot.x, targetSlot.y, 8, 'spark', '#00D4FF', 90, 0.32);
       return true;
     }
 
@@ -620,7 +819,7 @@ export class GameSimulation {
         y: targetUnit.y - 34,
         vy: -38,
         text: `Fusão Nv.${targetUnit.level}!`,
-        color: '#FDE047',
+        color: '#FACC15',
         scale: 1.2,
         life: 0.95,
         maxLife: 0.95,
@@ -640,41 +839,45 @@ export class GameSimulation {
 
   private spawnEnemyAlongRoute(forcedKind?: EnemyKind, initialProgressFrac = 0) {
     const kind = forcedKind ?? this.pickEnemyKind();
-    const laneOffset = kind === 'boss' ? 0 : (Math.random() - 0.5) * 20;
+    const laneOffset = kind === 'boss' ? 0 : (Math.random() - 0.5) * 18;
     const spawn = computeRouteSpawnPoint(this.arena.waypoints, laneOffset);
 
-    let baseHp = 22;
-    let baseSpeed = 46;
+    let baseHp = 24;
+    let baseSpeed = 48;
     let radius = 17;
     let damage = 10;
     let attackCooldown = 1.05;
-    let rewardEssence = 8;
+    let rewardEssence = 9;
     let rewardScore = 15;
+    let xpReward = 10;
 
     if (kind === 'shielded') {
-      baseHp = 48;
-      baseSpeed = 36;
+      baseHp = 50;
+      baseSpeed = 38;
       radius = 20;
       damage = 14;
       attackCooldown = 1.15;
-      rewardEssence = 12;
+      rewardEssence = 13;
       rewardScore = 25;
+      xpReward = 16;
     } else if (kind === 'brute') {
-      baseHp = 90;
-      baseSpeed = 40;
+      baseHp = 92;
+      baseSpeed = 42;
       radius = 22;
       damage = 18;
       attackCooldown = 1.2;
       rewardEssence = 18;
       rewardScore = 40;
+      xpReward = 26;
     } else if (kind === 'boss') {
       baseHp = this.waveBossHp;
-      baseSpeed = 29;
+      baseSpeed = 30;
       radius = 34;
       damage = 28 + this.currentStage * 4;
       attackCooldown = 1.25;
-      rewardEssence = 45 + this.currentStage * 5;
-      rewardScore = 180 + this.currentStage * 40;
+      rewardEssence = 50 + this.currentStage * 5;
+      rewardScore = 200 + this.currentStage * 40;
+      xpReward = 95;
     }
 
     const hp = kind === 'boss' ? baseHp : Math.round(baseHp * this.waveHpMult);
@@ -697,6 +900,7 @@ export class GameSimulation {
       attackAnim: 0,
       rewardEssence,
       rewardScore,
+      xpReward,
       walkPhase: Math.random() * Math.PI * 2,
       distanceTraveled: 0,
       waypointIndex: 1,
@@ -757,13 +961,18 @@ export class GameSimulation {
       p.y = y;
       p.vx = Math.cos(angle) * spd;
       p.vy = Math.sin(angle) * spd - (kind === 'smoke' ? 35 : 15);
-      p.size = kind === 'smoke' ? 6 + Math.random() * 6 : kind === 'grass' ? 4 + Math.random() * 3.5 : 3 + Math.random() * 3.5;
+      p.size =
+        kind === 'smoke'
+          ? 6 + Math.random() * 6
+          : kind === 'grass'
+            ? 4 + Math.random() * 3.5
+            : 3.2 + Math.random() * 3.8;
       p.rotation = Math.random() * Math.PI * 2;
       p.vRot = (Math.random() - 0.5) * 10;
       p.color = color;
       p.life = maxLife * (0.7 + Math.random() * 0.3);
       p.maxLife = p.life;
-      p.gravity = kind === 'smoke' ? -30 : kind === 'spark' ? 40 : 140;
+      p.gravity = kind === 'smoke' ? -30 : kind === 'spark' ? 30 : 140;
     }
   }
 
@@ -776,17 +985,19 @@ export class GameSimulation {
 
     if (this.phase === 'title') {
       const gate = this.arena.waypoints[0];
-      if (gate && Math.random() < dt * 6) {
+      if (gate && Math.random() < dt * 7) {
         this.spawnTypedParticles(
           gate.x + (Math.random() - 0.5) * 20,
           gate.y + (Math.random() - 0.5) * 20,
           1,
           'spark',
-          Math.random() > 0.4 ? '#C084FC' : '#F472B6',
-          38,
-          0.9
+          Math.random() > 0.45 ? '#00D4FF' : '#FF2E4C',
+          42,
+          0.85
         );
       }
+      this.hero.attackAnim = Math.max(0, this.hero.attackAnim - dt * 3);
+      this.hero.recoil = Math.max(0, this.hero.recoil - dt * 5);
       for (const unit of this.units) {
         unit.attackAnim = Math.max(0, unit.attackAnim - dt * 3);
         unit.recoil = Math.max(0, unit.recoil - dt * 5);
@@ -798,6 +1009,21 @@ export class GameSimulation {
     if (this.phase !== 'playing') return;
 
     this.survivalSeconds += dt;
+
+    if (this.activeBanner) {
+      this.activeBanner.life -= dt;
+      if (this.activeBanner.life <= 0) {
+        this.activeBanner = null;
+      }
+    }
+
+    if (this.comboTimer > 0) {
+      this.comboTimer -= dt;
+      if (this.comboTimer <= 0) {
+        this.comboCount = 0;
+        this.lastComboTier = 0;
+      }
+    }
 
     if (this.baseHp > 0 && this.baseHp / this.baseMaxHp <= 0.3) {
       this.lowHpAlarmTimer -= dt;
@@ -829,7 +1055,7 @@ export class GameSimulation {
         this.overchargeTickTimer = 0.5;
         this.essence += 3;
         this.essenceCollected += 3;
-        this.spawnTypedParticles(this.arena.castleX, this.arena.castleY - 14, 3, 'spark', '#FDE047', 65, 0.45);
+        this.spawnTypedParticles(this.hero.x, this.hero.y - 10, 3, 'spark', '#FACC15', 70, 0.45);
       }
     }
 
@@ -848,16 +1074,7 @@ export class GameSimulation {
         if (w.isBoss) {
           this.spawnEnemyAlongRoute('boss', 0);
           this.cameraTrauma = Math.min(1, this.cameraTrauma + 0.35);
-          this.floatingTexts.push({
-            x: w.x + 80,
-            y: w.y - 46,
-            vy: -22,
-            text: 'Chefe da Fase!',
-            color: '#F87171',
-            scale: 1.35,
-            life: 1.3,
-            maxLife: 1.3,
-          });
+          this.triggerRewardBanner('CHEFE NA ROTA!', 'Concentre seu poder de fogo!', 'crimson', 1.8);
         } else {
           for (let k = 0; k < w.spawnCount; k++) {
             this.spawnEnemyAlongRoute(undefined, k * 0.015);
@@ -882,9 +1099,9 @@ export class GameSimulation {
           blade.x + Math.cos(a) * r,
           blade.y + Math.sin(a) * r,
           1,
-          'grass',
-          '#4ADE80',
-          110,
+          'spark',
+          '#00D4FF',
+          120,
           0.35
         );
       }
@@ -895,9 +1112,9 @@ export class GameSimulation {
         for (const enemy of this.enemies) {
           if (enemy.isDead) continue;
           if (distanceBetween(blade.x, blade.y, enemy.x, enemy.y) <= blade.radius + enemy.radius) {
-            const roll = rollCriticalHit(blade.damagePerTick, 0.25);
+            const roll = rollCriticalHit(blade.damagePerTick, 0.28);
             const kb = computeRadialKnockbackVector(blade.x, blade.y, enemy.x, enemy.y, 45);
-            this.handleEnemyDamaged(enemy, roll.damage, kb.vx, kb.vy, true, roll.isCrit);
+            this.handleEnemyDamaged(enemy, roll.damage, kb.vx, kb.vy, true, roll.isCrit, true);
             hitAny = true;
           }
         }
@@ -933,18 +1150,36 @@ export class GameSimulation {
         saveProgress({
           highestUnlockedStage: this.highestUnlockedStage,
           bestScore: this.bestScore,
+          selectedHeroClass: this.selectedHeroClass,
         });
         soundEngine.stopMusic();
         soundEngine.playVictory();
         return;
       }
       this.waveBreakTimer += dt;
-      if (this.waveBreakTimer >= 1.4) {
+      if (this.waveBreakTimer >= 1.3) {
         this.startWave(this.wave + 1);
       }
     }
 
-    // 2. Defenders Auto-Combat
+    // 2A. Main Hero Auto-Combat
+    this.hero.cooldownTimer = Math.max(0, this.hero.cooldownTimer - dt);
+    this.hero.attackAnim = Math.max(0, this.hero.attackAnim - dt * 4.2);
+    this.hero.recoil = Math.max(0, this.hero.recoil - dt * 6);
+    this.hero.levelUpFlash = Math.max(0, this.hero.levelUpFlash - dt);
+
+    if (this.hero.cooldownTimer <= 0) {
+      const target = findNearestEnemyInRange(this.hero, this.enemies, this.arena);
+      if (target) {
+        this.hero.facingAngle = Math.atan2(target.y - this.hero.y, target.x - this.hero.x);
+        this.hero.cooldownTimer = this.hero.cooldown;
+        this.hero.attackAnim = 1;
+        this.hero.recoil = 1;
+        this.performHeroAttack(target);
+      }
+    }
+
+    // 2B. Support Defenders Auto-Combat
     for (const unit of this.units) {
       unit.cooldownTimer = Math.max(0, unit.cooldownTimer - dt);
       unit.attackAnim = Math.max(0, unit.attackAnim - dt * 4);
@@ -963,9 +1198,27 @@ export class GameSimulation {
       }
     }
 
-    // 3. Projectiles & Collision
+    // 3. Projectiles & Bomb Arcs
     for (let i = this.projectiles.length - 1; i >= 0; i--) {
       const proj = this.projectiles[i];
+      if (proj.isBomb && proj.startX !== undefined && proj.startY !== undefined && proj.targetX !== undefined && proj.targetY !== undefined && proj.arcDuration) {
+        proj.arcElapsed = (proj.arcElapsed ?? 0) + dt;
+        const t = Math.min(1, proj.arcElapsed / proj.arcDuration);
+        const arcLift = Math.sin(t * Math.PI) * 58;
+        proj.x = proj.startX + (proj.targetX - proj.startX) * t;
+        proj.y = proj.startY + (proj.targetY - proj.startY) * t - arcLift;
+
+        if (Math.random() < dt * 28) {
+          this.spawnTypedParticles(proj.x, proj.y, 1, 'spark', '#FACC15', 45, 0.22);
+        }
+
+        if (t >= 1) {
+          this.detonateBomb(proj);
+          this.projectiles.splice(i, 1);
+        }
+        continue;
+      }
+
       proj.life -= dt;
       proj.x += proj.vx * dt;
       proj.y += proj.vy * dt;
@@ -981,7 +1234,8 @@ export class GameSimulation {
             proj.vx * 0.04,
             proj.vy * 0.04,
             proj.isShockwave,
-            roll.isCrit
+            roll.isCrit,
+            Boolean(proj.isHeroAttack)
           );
           hit = true;
           if (!proj.isShockwave) break;
@@ -989,7 +1243,7 @@ export class GameSimulation {
       }
 
       if (hit && !proj.isShockwave) {
-        this.spawnTypedParticles(proj.x, proj.y, 5, 'spark', proj.color, 95, 0.28);
+        this.spawnTypedParticles(proj.x, proj.y, 6, 'spark', proj.color, 115, 0.28);
         this.projectiles.splice(i, 1);
       } else if (proj.life <= 0) {
         this.projectiles.splice(i, 1);
@@ -1034,7 +1288,7 @@ export class GameSimulation {
         enemy.lungeCooldown -= dt;
         if (enemy.lungeTimer > 0) {
           enemy.lungeTimer = Math.max(0, enemy.lungeTimer - dt);
-          speedMult = enemy.lungeTimer > 0.32 ? 0.35 : 2.1;
+          speedMult = enemy.lungeTimer > 0.32 ? 0.35 : 2.05;
         } else if (enemy.lungeCooldown <= 0 && enemy.pathProgress > 0.15 && enemy.pathProgress < 0.88) {
           enemy.lungeTimer = 0.65;
           enemy.lungeCooldown = 3.8 + Math.random() * 1.5;
@@ -1058,14 +1312,14 @@ export class GameSimulation {
         this.hitstopTimer = 0.045;
         soundEngine.playBaseHit();
         this.spawnTypedParticles(this.arena.castleX, this.arena.castleY + 12, 12, 'smoke', '#FCA5A5', 110, 0.45);
-        this.spawnTypedParticles(this.arena.castleX, this.arena.castleY + 12, 10, 'spark', '#EF4444', 150, 0.4);
+        this.spawnTypedParticles(this.arena.castleX, this.arena.castleY + 12, 10, 'spark', '#FF2E4C', 155, 0.4);
         this.floatingTexts.push({
           x: this.arena.castleX - 10,
           y: this.arena.castleY - 58,
           vy: -36,
           text: `-${enemy.damage} HP`,
-          color: '#FCA5A5',
-          scale: 1.2,
+          color: '#FF2E4C',
+          scale: 1.24,
           life: 0.9,
           maxLife: 0.9,
         });
@@ -1077,6 +1331,7 @@ export class GameSimulation {
           saveProgress({
             highestUnlockedStage: this.highestUnlockedStage,
             bestScore: this.bestScore,
+            selectedHeroClass: this.selectedHeroClass,
           });
           soundEngine.stopMusic();
           soundEngine.playDefeat();
@@ -1088,12 +1343,165 @@ export class GameSimulation {
     this.updateVisualEffects(dt);
   }
 
+  private performHeroAttack(target: EnemyEntity) {
+    const hero = this.hero;
+
+    if (hero.heroClass === 'archer') {
+      const baseAngle = Math.atan2(target.y - hero.y, target.x - hero.x);
+      const speed = 640;
+      const volleyAngles =
+        hero.level >= 5 ? [-0.14, 0, 0.14] : hero.level >= 3 ? [-0.08, 0.08] : [0];
+
+      for (const offsetAngle of volleyAngles) {
+        const ang = baseAngle + offsetAngle;
+        this.projectiles.push({
+          id: this.nextEntityId++,
+          x: hero.x + Math.cos(ang) * 20,
+          y: hero.y + Math.sin(ang) * 20,
+          vx: Math.cos(ang) * speed,
+          vy: Math.sin(ang) * speed,
+          radius: 7 + (hero.level - 1) * 0.8,
+          damage: hero.damage,
+          critChance: hero.critChance,
+          color: hero.level >= 4 ? '#FACC15' : '#00D4FF',
+          trailColor: '#7DD3FC',
+          targetEnemyId: target.id,
+          life: 0.95,
+          isShockwave: false,
+          isHeroAttack: true,
+        });
+      }
+      soundEngine.playArcherShot();
+      this.spawnTypedParticles(
+        hero.x + Math.cos(baseAngle) * 22,
+        hero.y + Math.sin(baseAngle) * 22,
+        5,
+        'spark',
+        '#00D4FF',
+        110,
+        0.24
+      );
+    } else if (hero.heroClass === 'swordsman') {
+      const cleaveRadius = hero.range * 0.96;
+      const spec = HERO_SPECS.swordsman;
+      this.slashes.push({
+        x: hero.x,
+        y: hero.y,
+        angle: hero.facingAngle,
+        radius: cleaveRadius,
+        life: 0.25,
+        maxLife: 0.25,
+        color: hero.level >= 4 ? '#FACC15' : '#FF2E4C',
+      });
+      soundEngine.playSwordCleave();
+
+      const hitEnemies = findEnemiesInSlashArc(
+        hero.x,
+        hero.y,
+        hero.facingAngle,
+        cleaveRadius,
+        spec.cleaveHalfAngle,
+        this.enemies
+      );
+      for (const enemy of hitEnemies) {
+        const roll = rollCriticalHit(hero.damage, hero.critChance);
+        const kb = computeRadialKnockbackVector(hero.x, hero.y, enemy.x, enemy.y, 65);
+        if (roll.isCrit) {
+          enemy.stunTimer = Math.max(enemy.stunTimer, 0.22);
+        }
+        this.handleEnemyDamaged(enemy, roll.damage, kb.vx, kb.vy, true, roll.isCrit, true);
+      }
+
+      if (hitEnemies.length >= 3 && this.time - this.lastExcellenceBannerTime > 5) {
+        this.lastExcellenceBannerTime = this.time;
+        this.triggerRewardBanner('EXCELENTE!', `Corte múltiplo (${hitEnemies.length} alvos)`, 'crimson', 1.45);
+      }
+
+      this.spawnTypedParticles(
+        hero.x + Math.cos(hero.facingAngle) * 48,
+        hero.y + Math.sin(hero.facingAngle) * 48,
+        9,
+        'spark',
+        '#FACC15',
+        155,
+        0.34
+      );
+    } else if (hero.heroClass === 'bomber') {
+      const duration = Math.max(
+        0.34,
+        Math.min(0.56, distanceBetween(hero.x, hero.y, target.x, target.y) / 560)
+      );
+      this.projectiles.push({
+        id: this.nextEntityId++,
+        x: hero.x,
+        y: hero.y - 8,
+        vx: 0,
+        vy: 0,
+        radius: 11 + (hero.level - 1) * 1.1,
+        damage: hero.damage,
+        critChance: hero.critChance,
+        color: '#FACC15',
+        trailColor: '#FF2E4C',
+        targetEnemyId: target.id,
+        life: duration + 0.1,
+        isShockwave: false,
+        isHeroAttack: true,
+        isBomb: true,
+        blastRadius: hero.blastRadius,
+        startX: hero.x,
+        startY: hero.y - 8,
+        targetX: target.x,
+        targetY: target.y,
+        arcDuration: duration,
+        arcElapsed: 0,
+      });
+      soundEngine.playBombLaunch();
+    }
+  }
+
+  private detonateBomb(proj: ProjectileEntity) {
+    const bx = proj.x;
+    const by = proj.y;
+    const radius = proj.blastRadius ?? 100;
+
+    this.explosions.push({
+      x: bx,
+      y: by,
+      radius,
+      life: 0.36,
+      maxLife: 0.36,
+      color: '#FACC15',
+    });
+
+    soundEngine.playExplosion();
+    this.cameraTrauma = Math.min(1, this.cameraTrauma + 0.24);
+    this.spawnTypedParticles(bx, by, 16, 'spark', '#FACC15', 210, 0.42);
+    this.spawnTypedParticles(bx, by, 10, 'spark', '#FF2E4C', 175, 0.38);
+    this.spawnTypedParticles(bx, by, 8, 'smoke', '#94A3B8', 90, 0.5);
+
+    let hitCount = 0;
+    for (const enemy of this.enemies) {
+      if (enemy.isDead) continue;
+      if (distanceBetween(bx, by, enemy.x, enemy.y) <= radius + enemy.radius) {
+        hitCount += 1;
+        const roll = rollCriticalHit(proj.damage, proj.critChance);
+        const kb = computeRadialKnockbackVector(bx, by, enemy.x, enemy.y, 70);
+        this.handleEnemyDamaged(enemy, roll.damage, kb.vx, kb.vy, true, roll.isCrit, true);
+      }
+    }
+
+    if (hitCount >= 3 && this.time - this.lastExcellenceBannerTime > 5) {
+      this.lastExcellenceBannerTime = this.time;
+      this.triggerRewardBanner('EXCELENTE!', `Explosão atingiu ${hitCount} inimigos!`, 'gold', 1.45);
+    }
+  }
+
   private performUnitAttack(unit: UnitEntity, target: EnemyEntity) {
     if (unit.kind === 'scout') {
       const dx = target.x - unit.x;
       const dy = target.y - unit.y;
       const dist = Math.hypot(dx, dy) || 1;
-      const speed = 540;
+      const speed = 560;
       this.projectiles.push({
         id: this.nextEntityId++,
         x: unit.x + (dx / dist) * 18,
@@ -1103,7 +1511,7 @@ export class GameSimulation {
         radius: 6 + (unit.level - 1) * 1.2,
         damage: unit.damage,
         critChance: unit.critChance,
-        color: unit.level >= 2 ? '#FACC15' : '#38BDF8',
+        color: unit.level >= 2 ? '#FACC15' : '#00D4FF',
         trailColor: '#BAE6FD',
         targetEnemyId: target.id,
         life: 0.9,
@@ -1114,7 +1522,7 @@ export class GameSimulation {
       const dx = target.x - unit.x;
       const dy = target.y - unit.y;
       const dist = Math.hypot(dx, dy) || 1;
-      const speed = 350;
+      const speed = 360;
       this.projectiles.push({
         id: this.nextEntityId++,
         x: unit.x + (dx / dist) * 20,
@@ -1124,14 +1532,14 @@ export class GameSimulation {
         radius: 16 + (unit.level - 1) * 3,
         damage: unit.damage,
         critChance: unit.critChance,
-        color: unit.level >= 2 ? '#38BDF8' : '#60A5FA',
+        color: unit.level >= 2 ? '#00D4FF' : '#60A5FA',
         trailColor: '#DBEAFE',
         targetEnemyId: target.id,
         life: 0.55,
         isShockwave: true,
       });
       soundEngine.playShieldBash();
-      this.spawnTypedParticles(unit.x + (dx / dist) * 18, unit.y + (dy / dist) * 18, 6, 'spark', '#93C5FD', 95, 0.3);
+      this.spawnTypedParticles(unit.x + (dx / dist) * 18, unit.y + (dy / dist) * 18, 6, 'spark', '#00D4FF', 95, 0.3);
     } else if (unit.kind === 'frog') {
       const slashRadius = unit.range * 0.9;
       this.slashes.push({
@@ -1141,7 +1549,7 @@ export class GameSimulation {
         radius: slashRadius,
         life: 0.24,
         maxLife: 0.24,
-        color: unit.level >= 2 ? '#FDE047' : '#34D399',
+        color: unit.level >= 2 ? '#FACC15' : '#34D399',
       });
       soundEngine.playSlash();
 
@@ -1155,13 +1563,13 @@ export class GameSimulation {
       );
       for (const enemy of hitEnemies) {
         const roll = rollCriticalHit(unit.damage, unit.critChance);
-        this.handleEnemyDamaged(enemy, roll.damage, 0, 0, true, roll.isCrit);
+        this.handleEnemyDamaged(enemy, roll.damage, 0, 0, true, roll.isCrit, false);
       }
       this.spawnTypedParticles(
         unit.x + Math.cos(unit.facingAngle) * 44,
         unit.y + Math.sin(unit.facingAngle) * 44,
         7,
-        'grass',
+        'spark',
         '#4ADE80',
         125,
         0.38
@@ -1175,64 +1583,132 @@ export class GameSimulation {
     knockX: number,
     knockY: number,
     heavy: boolean,
-    isCrit: boolean
+    isCrit: boolean,
+    byHero: boolean
   ) {
     const res = applyDamageToEnemy(enemy, damage);
     if (res.actualDamage <= 0) return;
 
-    enemy.knockbackVx += knockX * (enemy.kind === 'boss' ? 0.25 : 1);
-    enemy.knockbackVy += knockY * (enemy.kind === 'boss' ? 0.25 : 1);
+    enemy.knockbackVx += knockX * (enemy.kind === 'boss' ? 0.22 : 1);
+    enemy.knockbackVy += knockY * (enemy.kind === 'boss' ? 0.22 : 1);
 
     if (isCrit) {
-      this.spawnTypedParticles(enemy.x, enemy.y, 7, 'spark', '#FB923C', 145, 0.32);
+      this.spawnTypedParticles(enemy.x, enemy.y, 8, 'spark', '#FACC15', 165, 0.34);
     }
 
     this.floatingTexts.push({
       x: enemy.x + (Math.random() - 0.5) * 10,
       y: enemy.y - enemy.radius - 14,
-      vy: isCrit ? -46 : -36,
+      vy: isCrit ? -48 : -36,
       text: isCrit ? `-${res.actualDamage}!` : `-${res.actualDamage}`,
-      color: isCrit ? '#FACC15' : heavy ? '#6EE7B7' : '#FFFFFF',
-      scale: isCrit ? 1.32 : heavy ? 1.05 : 0.9,
-      life: isCrit ? 0.68 : 0.52,
-      maxLife: isCrit ? 0.68 : 0.52,
+      color: isCrit ? '#FACC15' : heavy ? '#00D4FF' : '#FFFFFF',
+      scale: isCrit ? 1.35 : heavy ? 1.05 : 0.9,
+      life: isCrit ? 0.68 : 0.5,
+      maxLife: isCrit ? 0.68 : 0.5,
       isCrit,
     });
 
     if (res.killed) {
       this.kills += 1;
-      const essenceMult = this.spells.overchargeTimer > 0 ? 1.5 : 1;
-      const gainedEssence = Math.ceil(enemy.rewardEssence * essenceMult);
+      if (byHero) {
+        this.hero.kills += 1;
+      }
+
+      const overchargeMult = this.spells.overchargeTimer > 0 ? 1.5 : 1;
+      const gainedEssence = Math.ceil(enemy.rewardEssence * overchargeMult);
       this.essence += gainedEssence;
       this.essenceCollected += gainedEssence;
-      this.score += enemy.rewardScore;
+
+      // Combo tracker
+      this.comboCount += 1;
+      this.comboTimer = 1.85;
+      const comboBonus = Math.min(30, this.comboCount * 3);
+      this.score += enemy.rewardScore + comboBonus;
       this.bestScore = Math.max(this.bestScore, this.score);
-      this.hitstopTimer = Math.max(this.hitstopTimer, enemy.kind === 'boss' ? 0.08 : isCrit ? 0.042 : 0.03);
-      this.cameraTrauma = Math.min(1, this.cameraTrauma + (enemy.kind === 'boss' ? 0.65 : isCrit ? 0.24 : 0.14));
+
+      this.hitstopTimer = Math.max(
+        this.hitstopTimer,
+        enemy.kind === 'boss' ? 0.08 : isCrit ? 0.04 : 0.025
+      );
+      this.cameraTrauma = Math.min(
+        1,
+        this.cameraTrauma + (enemy.kind === 'boss' ? 0.65 : isCrit ? 0.24 : 0.14)
+      );
       soundEngine.playKill();
 
+      // Hero XP progression in real time!
+      const xpShare = byHero ? 1 : 0.72;
+      const gainedXp = Math.max(4, Math.round(enemy.xpReward * xpShare * overchargeMult));
+      const lvlRes = applyHeroXpGain(this.hero, gainedXp);
+      if (lvlRes.leveledUp) {
+        soundEngine.playLevelUp(lvlRes.isMaxReached);
+        this.cameraTrauma = Math.min(1, this.cameraTrauma + 0.45);
+        this.hitstopTimer = 0.06;
+        this.shockwaves.push({
+          x: this.hero.x,
+          y: this.hero.y,
+          currentRadius: 24,
+          maxRadius: 175,
+          life: 0.48,
+          maxLife: 0.48,
+          color: '#FACC15',
+        });
+        this.spawnTypedParticles(this.hero.x, this.hero.y, 26, 'spark', '#FACC15', 220, 0.6);
+        this.spawnTypedParticles(this.hero.x, this.hero.y, 14, 'spark', '#00D4FF', 180, 0.55);
+
+        if (lvlRes.isMaxReached) {
+          this.triggerRewardBanner(
+            'EVOLUÇÃO MÁXIMA!',
+            `${HERO_SPECS[this.hero.heroClass].name} atingiu Nv.${MAX_HERO_LEVEL}!`,
+            'gold',
+            2.1
+          );
+        } else {
+          this.triggerRewardBanner(
+            `HERÓI Nv.${lvlRes.newLevel}!`,
+            'Poder de ataque e tamanho aumentados!',
+            'electric',
+            1.75
+          );
+        }
+      } else {
+        // Combo callouts (only when not overriding a fresh level-up banner)
+        if (this.comboCount >= 6 && this.lastComboTier < 3) {
+          this.lastComboTier = 3;
+          soundEngine.playCombo(this.comboCount);
+          this.triggerRewardBanner('IMPARÁVEL!', `${this.comboCount}x abates seguidos!`, 'crimson', 1.45);
+        } else if (this.comboCount >= 4 && this.lastComboTier < 2) {
+          this.lastComboTier = 2;
+          soundEngine.playCombo(this.comboCount);
+          this.triggerRewardBanner('COMBO TRIPLO!', `${this.comboCount}x em sequência!`, 'gold', 1.35);
+        } else if (this.comboCount >= 2 && this.lastComboTier < 1) {
+          this.lastComboTier = 1;
+          soundEngine.playCombo(this.comboCount);
+          this.triggerRewardBanner('COMBO DUPLO!', '+Bônus de Pontuação', 'electric', 1.25);
+        }
+      }
+
       const burstScale = enemy.kind === 'boss' ? 2 : 1;
-      this.spawnTypedParticles(enemy.x, enemy.y, 8 * burstScale, 'smoke', '#CBD5E1', 90, 0.52);
-      this.spawnTypedParticles(enemy.x, enemy.y, 7 * burstScale, 'grass', '#84CC16', 135, 0.42);
+      this.spawnTypedParticles(enemy.x, enemy.y, 8 * burstScale, 'smoke', '#64748B', 95, 0.48);
       this.spawnTypedParticles(
         enemy.x,
         enemy.y,
-        8 * burstScale,
+        9 * burstScale,
         'spark',
-        isCrit || enemy.kind === 'boss' ? '#FB923C' : '#FDE047',
-        175,
-        0.36
+        isCrit || enemy.kind === 'boss' ? '#FF2E4C' : '#FACC15',
+        185,
+        0.38
       );
 
       this.floatingTexts.push({
         x: enemy.x,
         y: enemy.y - enemy.radius - 28,
-        vy: -42,
-        text: `+${enemy.rewardScore}`,
-        color: '#FDE047',
-        scale: enemy.kind === 'boss' ? 1.3 : 1.02,
-        life: 0.7,
-        maxLife: 0.7,
+        vy: -44,
+        text: `+${gainedXp} XP · +${enemy.rewardScore}`,
+        color: '#FACC15',
+        scale: enemy.kind === 'boss' ? 1.28 : 0.98,
+        life: 0.72,
+        maxLife: 0.72,
       });
     }
   }
@@ -1243,11 +1719,16 @@ export class GameSimulation {
       if (this.slashes[i].life <= 0) this.slashes.splice(i, 1);
     }
 
+    for (let i = this.explosions.length - 1; i >= 0; i--) {
+      this.explosions[i].life -= dt;
+      if (this.explosions[i].life <= 0) this.explosions.splice(i, 1);
+    }
+
     for (let i = this.shockwaves.length - 1; i >= 0; i--) {
       const sw = this.shockwaves[i];
       sw.life -= dt;
       const progress = 1 - Math.max(0, sw.life / sw.maxLife);
-      sw.currentRadius = this.arena.castleRadius + (sw.maxRadius - this.arena.castleRadius) * progress;
+      sw.currentRadius = 26 + (sw.maxRadius - 26) * progress;
       if (sw.life <= 0) this.shockwaves.splice(i, 1);
     }
 
@@ -1280,9 +1761,12 @@ export class GameSimulation {
   }
 
   public getHudSnapshot(): HudSnapshot {
+    const xpBounds = getHeroXpBounds(this.hero.level);
     return {
       phase: this.phase,
       stage: this.currentStage,
+      routeArchetype: this.routeArchetype,
+      stageTitle: this.stageTitle,
       totalWavesInStage: this.totalWavesInStage,
       highestUnlockedStage: this.highestUnlockedStage,
       baseHp: this.baseHp,
@@ -1295,10 +1779,19 @@ export class GameSimulation {
       wave: this.wave,
       kills: this.kills,
       survivalSeconds: this.survivalSeconds,
+      selectedHeroClass: this.selectedHeroClass,
+      heroLevel: this.hero.level,
+      heroXp: this.hero.xp,
+      heroCurrentLevelXp: xpBounds.currentFloor,
+      heroNextLevelXp: xpBounds.nextThreshold,
+      heroKills: this.hero.kills,
+      heroRepositionMode: this.heroRepositionMode,
       selectedUnit: this.selectedUnit,
       unitCount: this.units.length,
       maxUnitLevelReached: this.maxUnitLevelReached,
       mergesPerformed: this.mergesPerformed,
+      comboCount: this.comboCount,
+      activeBanner: this.activeBanner ? { ...this.activeBanner } : null,
       hoveredSlotId: this.hoveredSlotId,
       mutedMusic: soundEngine.mutedMusic,
       mutedSfx: soundEngine.mutedSfx,

@@ -662,13 +662,13 @@ export const GameModals: React.FC<GameModalsProps> = ({
               </div>
             </div>
             <div className="rounded-xl bg-[#0F172A] p-2.5">
-              <div className="text-[10px] font-bold text-[#00D4FF] uppercase">Núcleos Ganhos</div>
-              <div className="font-mono-tabular mt-0.5 text-xl font-bold text-[#FACC15]" data-testid="modal-time">
-                +{hud.lastEarnedEvolutionPoints}
+              <div className="text-[10px] font-bold text-[#00D4FF] uppercase">Tempo</div>
+              <div className="font-mono-tabular mt-0.5 text-xl font-bold text-white" data-testid="modal-time">
+                {formatSurvivalTime(hud.survivalSeconds)}
               </div>
             </div>
             <div className="rounded-xl bg-[#0F172A] p-2.5">
-              <div className="text-[10px] font-bold text-[#FF2E4C] uppercase">Pontos · {formatSurvivalTime(hud.survivalSeconds)}</div>
+              <div className="text-[10px] font-bold text-[#FF2E4C] uppercase">Pontos</div>
               <div className="font-mono-tabular mt-0.5 text-xl font-bold text-white" data-testid="modal-score">
                 {Math.round(hud.score)}
               </div>

@@ -45,7 +45,6 @@ interface GameModalsProps {
   selectedStage: number;
   convergenceStages: ReadonlyArray<number>;
   onSelectHero: (heroClass: HeroClass) => void;
-  onEvolveHero: (heroClass: HeroClass) => void;
   onSelectStage: (stage: number) => void;
   onSelectUpgrade: (upgradeId: HeroUpgradeId) => void;
   onStart: (stage?: number) => void;
@@ -95,7 +94,6 @@ export const GameModals: React.FC<GameModalsProps> = ({
   selectedStage,
   convergenceStages,
   onSelectHero,
-  onEvolveHero,
   onSelectStage,
   onSelectUpgrade,
   onStart,
@@ -257,18 +255,12 @@ export const GameModals: React.FC<GameModalsProps> = ({
                 <h2 className="font-display text-base font-bold text-[#FACC15] sm:text-lg">
                   {stageCfg.isConvergenceStage
                     ? 'Convergência Trio: Todos os 3 Heróis vão à Batalha!'
-                    : 'Escolha e Evolua seus Heróis'}
+                    : 'Escolha seu Herói Principal'}
                 </h2>
               </div>
-              <div
-                data-testid="menu-evolution-points"
-                className="font-mono-tabular flex items-center gap-1.5 rounded-xl border border-[#FACC15]/50 bg-[#422006]/70 px-2.5 py-1 text-xs font-bold text-[#FEF08A]"
-              >
-                <Sparkles className="h-3.5 w-3.5 text-[#FACC15]" />
-                <span>
-                  {hud.evolutionPoints} {hud.evolutionPoints === 1 ? 'Núcleo' : 'Núcleos'} de Evolução
-                </span>
-              </div>
+              <span className="text-[11px] font-semibold text-[#94A3B8]">
+                Evolui em tempo real combatendo inimigos
+              </span>
             </div>
 
             <div className="grid grid-cols-1 gap-2 sm:grid-cols-3 sm:gap-2.5">
@@ -277,8 +269,6 @@ export const GameModals: React.FC<GameModalsProps> = ({
                 const saved = hud.heroRoster[heroClass];
                 const isSelected = stageCfg.isConvergenceStage || hud.selectedHeroClass === heroClass;
                 const isMax = saved.level >= MAX_HERO_LEVEL;
-                const evoCost = getHeroEvolutionCost(saved.level);
-                const canAffordEvo = !isMax && hud.evolutionPoints >= evoCost;
                 const bounds = getHeroXpBounds(saved.level);
                 const xpLeft = Math.max(0, bounds.nextThreshold - saved.xp);
                 const xpSpan = Math.max(1, bounds.nextThreshold - bounds.currentFloor);
@@ -359,29 +349,6 @@ export const GameModals: React.FC<GameModalsProps> = ({
                         </div>
                       </div>
                     </div>
-
-                    {/* Player Autonomy: Choose Who to Evolve */}
-                    <button
-                      type="button"
-                      data-testid={`evolve-hero-${heroClass}`}
-                      disabled={!canAffordEvo}
-                      onClick={(e) => {
-                        e.stopPropagation();
-                        onEvolveHero(heroClass);
-                      }}
-                      className={`mt-2.5 flex w-full items-center justify-center gap-1.5 rounded-lg border px-2 py-1.5 text-[11px] font-bold whitespace-nowrap transition-transform active:translate-y-0.5 ${
-                        isMax
-                          ? 'border-[#334155] bg-[#080D1A] text-[#FACC15]'
-                          : canAffordEvo
-                            ? 'border-[#FEF08A] bg-gradient-to-r from-[#0284C7] to-[#00D4FF] text-[#020617] shadow-[0_2px_0_#0369A1] hover:brightness-110'
-                            : 'cursor-not-allowed border-[#1E293B] bg-[#080D1A] text-white/40'
-                      }`}
-                    >
-                      <Sparkles className="h-3.5 w-3.5 shrink-0" />
-                      <span>
-                        {isMax ? 'Evolução Máxima' : `Evoluir (${evoCost} Núcleo${evoCost > 1 ? 's' : ''})`}
-                      </span>
-                    </button>
                   </div>
                 );
               })}
@@ -461,13 +428,6 @@ export const GameModals: React.FC<GameModalsProps> = ({
                 <span className="font-mono-tabular text-[#00D4FF]">
                   · {stageCfg.routeCount} {stageCfg.routeCount === 1 ? 'Rota' : 'Rotas'} · {stageCfg.totalWaves} ondas
                 </span>
-                {stageCfg.isConvergenceStage ? (
-                  <span className="text-[#FF2E4C]">· CONVERGÊNCIA TRIO (3 Heróis)</span>
-                ) : (
-                  <span className="text-[#94A3B8]">
-                    · Próximo Trio: Fase {hud.nextConvergenceStage}
-                  </span>
-                )}
               </div>
 
               <div className="flex items-center gap-1.5">
@@ -516,20 +476,14 @@ export const GameModals: React.FC<GameModalsProps> = ({
                     disabled={!unlocked}
                     data-testid={`stage-btn-${stageNum}`}
                     data-convergence={isConvergence ? 'true' : 'false'}
-                    aria-label={
-                      unlocked
-                        ? `Selecionar Fase ${stageNum}${isConvergence ? ' (Convergência Trio)' : ''}`
-                        : `Fase ${stageNum} bloqueada`
-                    }
+                    aria-label={unlocked ? `Selecionar Fase ${stageNum}` : `Fase ${stageNum} bloqueada`}
                     onClick={() => {
                       soundEngine.playClick();
                       onSelectStage(stageNum);
                     }}
                     className={`font-mono-tabular relative flex h-9.5 items-center justify-center rounded-xl border-2 text-xs font-bold transition-transform active:translate-y-0.5 sm:text-sm ${
                       !unlocked
-                        ? isConvergence
-                          ? 'cursor-not-allowed border-[#FACC15]/30 bg-[#1B1408] text-[#FACC15]/45'
-                          : 'cursor-not-allowed border-[#1E293B] bg-[#080D1A] text-white/30'
+                        ? 'cursor-not-allowed border-[#1E293B] bg-[#080D1A] text-white/30'
                         : active
                           ? 'border-[#FACC15] bg-[#FF2E4C] text-white shadow-[0_3px_0_#991B1B]'
                           : isConvergence
@@ -544,20 +498,6 @@ export const GameModals: React.FC<GameModalsProps> = ({
                     }`}
                   >
                     {unlocked ? stageNum : <Lock className="h-3.5 w-3.5" />}
-                    {(isConvergence || isBossStage || allyUnlock || enemyUnlock) && (
-                      <span
-                        aria-hidden="true"
-                        className={`absolute -top-1 -right-1 h-2.5 w-2.5 rounded-full border border-[#020617] ${
-                          isConvergence
-                            ? 'bg-[#FF2E4C]'
-                            : isBossStage
-                              ? 'bg-[#FACC15]'
-                              : allyUnlock
-                                ? 'bg-[#10B981]'
-                                : 'bg-[#00D4FF]'
-                        }`}
-                      />
-                    )}
                   </button>
                 );
               })}

@@ -30,6 +30,7 @@ import {
   getHeroXpBounds,
   getStageConfig,
   getStageRouteDefinition,
+  isEliteEnemy,
   isValidFreeHeroPosition,
   pushEnemyBackAlongRoute,
   rollCriticalHit,
@@ -1497,9 +1498,14 @@ export class GameSimulation {
       Math.min(1.45, 1 + (this.wave - 1) * 0.04 + this.currentStage * 0.003) *
       (this.isConvergenceStage ? 1.06 : 1);
 
+    const isBoss = kind === 'boss' || Boolean(catalogEntry?.isBoss);
+    const isElite = isEliteEnemy({ kind, isElite: Boolean(catalogEntry?.isElite), isBoss });
+
     const enemy: EnemyEntity = {
       id: this.nextEntityId++,
       kind,
+      isBoss,
+      isElite,
       catalogId: catalogEntry?.id,
       displayName: catalogEntry?.name,
       primaryColor: catalogEntry?.primaryColor,
@@ -1788,9 +1794,6 @@ export class GameSimulation {
     } else if (this.enemies.length === 0 && this.hordeWarnings.length === 0) {
       if (this.wave >= this.totalWavesInStage) {
         this.phase = 'victory';
-        const stageClearBonus = this.isConvergenceStage ? 6 : 3;
-        this.evolutionPoints += stageClearBonus;
-        this.lastEarnedEvolutionPoints += stageClearBonus;
         this.highestUnlockedStage = unlockNextStage(this.currentStage, this.highestUnlockedStage);
         this.bestScore = Math.max(this.bestScore, this.score);
         this.persistProgress();
@@ -1800,10 +1803,6 @@ export class GameSimulation {
       }
       this.waveBreakTimer += dt;
       if (this.waveBreakTimer >= 1.25) {
-        // Wave Clear reward: +1 Núcleo de Evolução!
-        const waveBonus = this.isConvergenceStage ? 2 : 1;
-        this.evolutionPoints += waveBonus;
-        this.lastEarnedEvolutionPoints += waveBonus;
         this.persistProgress();
         this.startWave(this.wave + 1);
       }
@@ -2491,34 +2490,19 @@ export class GameSimulation {
     }
 
     this.floatingTexts.push({
-      x: enemy.x + (Math.random() - 0.5) * 10,
-      y: enemy.y - enemy.radius - 14,
-      vy: isCrit ? -48 : -36,
-      text: isCrit ? `-${res.actualDamage}!` : `-${res.actualDamage}`,
-      color: isCrit ? '#FACC15' : heavy ? '#00D4FF' : '#FFFFFF',
-      scale: isCrit ? 1.35 : heavy ? 1.05 : 0.9,
-      life: isCrit ? 0.68 : 0.5,
-      maxLife: isCrit ? 0.68 : 0.5,
+      x: enemy.x + (Math.random() - 0.5) * 12,
+      y: enemy.y - enemy.radius - 16,
+      vy: isCrit ? -54 : -36,
+      text: isCrit ? `CRÍTICO! -${res.actualDamage}` : `-${res.actualDamage}`,
+      color: isCrit ? '#FF3355' : heavy ? '#00D4FF' : '#FFFFFF',
+      scale: isCrit ? 1.6 : heavy ? 1.05 : 0.9,
+      life: isCrit ? 0.78 : 0.5,
+      maxLife: isCrit ? 0.78 : 0.5,
       isCrit,
     });
 
     if (res.killed) {
       this.kills += 1;
-      if (this.kills % 15 === 0) {
-        this.evolutionPoints += 1;
-        this.lastEarnedEvolutionPoints += 1;
-        this.floatingTexts.push({
-          x: enemy.x,
-          y: enemy.y - 46,
-          vy: -40,
-          text: '+1 Núcleo Evolução!',
-          color: '#00D4FF',
-          scale: 1.15,
-          life: 1.05,
-          maxLife: 1.05,
-          isCrit: true,
-        });
-      }
 
       const gainedEssence = computeEnemyEssenceReward(
         enemy.kind,
@@ -2534,13 +2518,18 @@ export class GameSimulation {
       this.score += enemy.rewardScore + comboBonus;
       this.bestScore = Math.max(this.bestScore, this.score);
 
+      const isElite = isEliteEnemy(enemy);
+      const isBoss = enemy.kind === 'boss' || Boolean(enemy.isBoss);
+
       this.hitstopTimer = Math.max(
         this.hitstopTimer,
-        enemy.kind === 'boss' || enemy.kind === 'titan' ? 0.07 : isCrit ? 0.038 : 0.022
+        isBoss ? 0.07 : isElite ? 0.048 : isCrit ? 0.038 : 0.022
       );
+      // Subtle screenshake on elite defeat (+0.38 camera trauma) vs boss (+0.65) vs regular (+0.14)
+      const shakeTrauma = isBoss ? 0.65 : isElite ? 0.38 : isCrit ? 0.24 : 0.14;
       this.cameraTrauma = Math.min(
         1,
-        this.cameraTrauma + (enemy.kind === 'boss' ? 0.65 : isCrit ? 0.24 : 0.14)
+        this.cameraTrauma + shakeTrauma
       );
       soundEngine.playKill();
 
@@ -2615,17 +2604,40 @@ export class GameSimulation {
 
       this.persistProgress();
 
-      const burstScale = enemy.kind === 'boss' ? 2 : 1;
+      const burstScale = isBoss ? 2 : isElite ? 1.5 : 1;
       this.spawnTypedParticles(enemy.x, enemy.y, 8 * burstScale, 'smoke', '#64748B', 95, 0.48);
       this.spawnTypedParticles(
         enemy.x,
         enemy.y,
         9 * burstScale,
         'spark',
-        isCrit || enemy.kind === 'boss' ? '#FF2E4C' : '#FACC15',
+        isCrit || isBoss || isElite ? '#FF2E4C' : '#FACC15',
         185,
         0.38
       );
+
+      if (isElite && !isBoss) {
+        this.shockwaves.push({
+          x: enemy.x,
+          y: enemy.y,
+          currentRadius: 10,
+          maxRadius: 72,
+          life: 0.28,
+          maxLife: 0.28,
+          color: '#FACC15',
+        });
+        this.floatingTexts.push({
+          x: enemy.x,
+          y: enemy.y - enemy.radius - 42,
+          vy: -32,
+          text: 'ELITE DERROTADO!',
+          color: '#FACC15',
+          scale: 1.15,
+          life: 0.85,
+          maxLife: 0.85,
+          isCrit: true,
+        });
+      }
 
       this.floatingTexts.push({
         x: enemy.x,
@@ -2633,7 +2645,7 @@ export class GameSimulation {
         vy: -44,
         text: `+${Math.round(enemy.xpReward * (attackerHeroClass ? 1 : 0.7) * overchargeMult)} XP · +${enemy.rewardScore}`,
         color: '#FACC15',
-        scale: enemy.kind === 'boss' ? 1.28 : 0.96,
+        scale: isBoss ? 1.28 : isElite ? 1.08 : 0.96,
         life: 0.72,
         maxLife: 0.72,
       });

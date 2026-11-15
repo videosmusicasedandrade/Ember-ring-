@@ -221,16 +221,7 @@ export default function App() {
     [syncHud]
   );
 
-  const handleEvolveHero = useCallback(
-    (heroClass: HeroClass) => {
-      const sim = simRef.current;
-      if (!sim) return;
-      if (sim.evolveHeroInMenu(heroClass)) {
-        syncHud();
-      }
-    },
-    [syncHud]
-  );
+
 
   const handleSelectUpgrade = useCallback(
     (upgradeId: HeroUpgradeId) => {
@@ -369,7 +360,6 @@ export default function App() {
         selectedStage={selectedStage}
         convergenceStages={simRef.current!.convergenceStages}
         onSelectHero={handleSelectHero}
-        onEvolveHero={handleEvolveHero}
         onSelectStage={handleSelectStage}
         onSelectUpgrade={handleSelectUpgrade}
         onStart={handleStart}

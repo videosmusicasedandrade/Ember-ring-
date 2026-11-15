@@ -1,4 +1,4 @@
-import { canMergeUnits, isValidFreeHeroPosition, pointToSegmentDistance } from './engineMath';
+import { canMergeUnits, isEliteEnemy, isValidFreeHeroPosition, pointToSegmentDistance } from './engineMath';
 import { GameSimulation } from './simulation';
 import {
   ArenaConfig,
@@ -703,10 +703,11 @@ export class ArenaRenderer {
       const alpha = Math.min(1, (ft.life / ft.maxLife) * 1.4);
       ctx.save();
       ctx.globalAlpha = alpha;
-      ctx.font = `800 ${Math.round(13.5 * ft.scale)}px "Fredoka", "Plus Jakarta Sans", sans-serif`;
+      const fontSize = ft.isCrit ? 17 : 13.5;
+      ctx.font = `${ft.isCrit ? 900 : 800} ${Math.round(fontSize * ft.scale)}px "Fredoka", "Plus Jakarta Sans", sans-serif`;
       ctx.textAlign = 'center';
       ctx.textBaseline = 'middle';
-      ctx.lineWidth = ft.isCrit ? 4.5 : 3.5;
+      ctx.lineWidth = ft.isCrit ? 5.5 : 3.5;
       ctx.strokeStyle = ft.isCrit ? '#450A0A' : '#020617';
       ctx.strokeText(ft.text, ft.x, ft.y);
       ctx.fillStyle = ft.color;
@@ -1728,7 +1729,8 @@ export class ArenaRenderer {
   }
 
   private drawEnemy(ctx: CanvasRenderingContext2D, enemy: EnemyEntity) {
-    const isBoss = enemy.kind === 'boss';
+    const isBoss = enemy.kind === 'boss' || Boolean(enemy.isBoss);
+    const isElite = isEliteEnemy(enemy);
     const isTitan = enemy.kind === 'titan';
     const isReaper = enemy.kind === 'reaper';
     const waddle = enemy.isDead ? 0 : Math.sin(enemy.walkPhase) * (isBoss ? 0.08 : 0.12);
@@ -1749,7 +1751,9 @@ export class ArenaRenderer {
         ? 'rgba(168, 85, 247, 0.35)'
         : isReaper
           ? 'rgba(250, 204, 21, 0.3)'
-          : 'rgba(2, 6, 23, 0.45)';
+          : isElite
+            ? 'rgba(250, 204, 21, 0.25)'
+            : 'rgba(2, 6, 23, 0.45)';
     ctx.beginPath();
     ctx.ellipse(0, enemy.radius - 2, enemy.radius * 0.9, isBoss ? 11 : 6.5, 0, 0, Math.PI * 2);
     ctx.fill();
@@ -1760,6 +1764,14 @@ export class ArenaRenderer {
       ctx.beginPath();
       ctx.ellipse(0, enemy.radius - 4, enemy.radius * 1.08, 13, 0, 0, Math.PI * 2);
       ctx.stroke();
+    } else if (isElite && !enemy.isDead) {
+      ctx.strokeStyle = 'rgba(250, 204, 21, 0.75)';
+      ctx.lineWidth = 2.2;
+      ctx.setLineDash([4, 3]);
+      ctx.beginPath();
+      ctx.ellipse(0, enemy.radius - 3, enemy.radius * 1.05, 8.5, 0, 0, Math.PI * 2);
+      ctx.stroke();
+      ctx.setLineDash([]);
     }
 
     if (isTitan && !enemy.isDead && enemy.bracingTimer > 0) {
@@ -2064,6 +2076,16 @@ export class ArenaRenderer {
         ctx.strokeText(bossLabel, enemy.x, yPos - 5);
         ctx.fillStyle = '#FACC15';
         ctx.fillText(bossLabel, enemy.x, yPos - 5);
+      } else if (isElite) {
+        ctx.font = '800 12px "Fredoka", "Plus Jakarta Sans", sans-serif';
+        ctx.textAlign = 'center';
+        ctx.textBaseline = 'bottom';
+        ctx.lineWidth = 3.5;
+        ctx.strokeStyle = '#020617';
+        const eliteText = `★ ${enemy.displayName ?? 'ELITE'} · ${enemy.hp}`;
+        ctx.strokeText(eliteText, enemy.x, yPos);
+        ctx.fillStyle = '#FACC15';
+        ctx.fillText(eliteText, enemy.x, yPos);
       } else {
         ctx.font = '800 14px "Fredoka", "Plus Jakarta Sans", sans-serif';
         ctx.textAlign = 'center';

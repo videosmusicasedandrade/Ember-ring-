@@ -1,5 +1,5 @@
 import React, { useEffect, useState } from 'react';
-import { Move, Music, Pause, Plus, RotateCcw, Shield, Sparkles, Volume2, VolumeX } from 'lucide-react';
+import { Crosshair, Move, Music, Pause, Plus, RotateCcw, Shield, Sparkles, Swords, Volume2, VolumeX, Zap } from 'lucide-react';
 import { soundEngine } from '../game/audio';
 import { ALLY_ALBUM, getUnlockedAlliesForStage } from '../game/bestiaryData';
 import {
@@ -83,6 +83,7 @@ export const GameHUD: React.FC<GameHUDProps> = ({
   onRestart,
 }) => {
   const [ghostHp, setGhostHp] = useState(hud.baseHp);
+  const [hoveredUnitKind, setHoveredUnitKind] = useState<UnitKind | null>(null);
 
   useEffect(() => {
     if (hud.baseHp < ghostHp) {
@@ -513,7 +514,105 @@ export const GameHUD: React.FC<GameHUDProps> = ({
       </div>
 
       {/* Bottom Support Troop Recruitment Dock (Dynamically unlocked Allies from ALLY_ALBUM) */}
-      <div className="pointer-events-none flex w-full justify-center">
+      <div className="pointer-events-none flex w-full flex-col items-center">
+        {/* Detailed Unit Tooltip Overlay */}
+        {hoveredUnitKind && (() => {
+          const spec = UNIT_SPECS[hoveredUnitKind];
+          const ally = ALLY_ALBUM.find((a) => a.unitKind === hoveredUnitKind);
+          if (!spec) return null;
+          const attackSpeed = (1 / spec.cooldown).toFixed(1);
+          const effectiveDamage = hud.paladinAuraActive ? Math.round(spec.damage * 1.25) : spec.damage;
+
+          return (
+            <div
+              data-testid="unit-tooltip"
+              role="tooltip"
+              className="pointer-events-none mb-2 z-40 flex w-full max-w-[94vw] sm:max-w-md flex-col gap-2 rounded-2xl border-2 border-[#00D4FF]/40 bg-[#0A1128]/95 p-3 shadow-[0_12px_32px_rgba(0,0,0,0.85)] backdrop-blur-md transition-all"
+            >
+              {/* Header */}
+              <div className="flex items-center justify-between gap-2 border-b border-white/10 pb-2">
+                <div className="flex min-w-0 items-center gap-2">
+                  <div className="flex h-9 w-9 shrink-0 items-center justify-center rounded-xl border border-white/10 bg-[#020617]">
+                    <UnitIcon kind={hoveredUnitKind} />
+                  </div>
+                  <div className="min-w-0">
+                    <div className="flex flex-wrap items-center gap-1.5">
+                      <span className="font-display text-sm font-bold tracking-wide text-white">
+                        {spec.name}
+                      </span>
+                      <span className="font-mono-tabular rounded border border-[#FACC15]/30 bg-[#FACC15]/10 px-1.5 py-0.5 text-[10px] font-bold text-[#FACC15]">
+                        Tecla [{ally?.hotkey ?? spec.hotkey}]
+                      </span>
+                    </div>
+                    <div
+                      className="text-[11px] font-medium"
+                      style={{ color: ally?.colorHex ?? '#38BDF8' }}
+                    >
+                      {spec.shortRole}
+                    </div>
+                  </div>
+                </div>
+                <div className="flex shrink-0 flex-col items-end">
+                  <span className="font-mono-tabular text-xs font-bold text-[#FACC15]">
+                    {spec.cost} essência
+                  </span>
+                  <span className="text-[10px] text-white/60">{spec.maxHp} HP Base</span>
+                </div>
+              </div>
+
+              {/* Primary Combat Stats: Damage, Range, Attack Speed */}
+              <div className="grid grid-cols-3 gap-2">
+                {/* Dano */}
+                <div className="flex flex-col items-center justify-center rounded-xl border border-red-500/25 bg-red-950/40 px-2 py-1.5 text-center">
+                  <div className="flex items-center gap-1 text-[10px] font-bold uppercase tracking-wider text-red-400">
+                    <Swords className="h-3 w-3" />
+                    <span>Dano</span>
+                  </div>
+                  <div className="font-mono-tabular text-sm font-black text-red-300">
+                    {effectiveDamage}
+                    {hud.paladinAuraActive && (
+                      <span className="ml-1 text-[9px] font-bold text-[#38BDF8]">(Aura)</span>
+                    )}
+                  </div>
+                  <div className="text-[9px] text-red-300/70">
+                    Crit {Math.round(spec.critChance * 100)}%
+                  </div>
+                </div>
+
+                {/* Alcance */}
+                <div className="flex flex-col items-center justify-center rounded-xl border border-sky-500/25 bg-sky-950/40 px-2 py-1.5 text-center">
+                  <div className="flex items-center gap-1 text-[10px] font-bold uppercase tracking-wider text-sky-400">
+                    <Crosshair className="h-3 w-3" />
+                    <span>Alcance</span>
+                  </div>
+                  <div className="font-mono-tabular text-sm font-black text-sky-300">
+                    {spec.range} px
+                  </div>
+                  <div className="text-[9px] text-sky-300/70">raio de tiro</div>
+                </div>
+
+                {/* Velocidade de Ataque */}
+                <div className="flex flex-col items-center justify-center rounded-xl border border-amber-500/25 bg-amber-950/40 px-2 py-1.5 text-center">
+                  <div className="flex items-center gap-1 text-[10px] font-bold uppercase tracking-wider text-amber-400">
+                    <Zap className="h-3 w-3" />
+                    <span>Vel. Ataque</span>
+                  </div>
+                  <div className="font-mono-tabular text-sm font-black text-amber-300">
+                    {attackSpeed}/s
+                  </div>
+                  <div className="text-[9px] text-amber-300/70">{spec.cooldown}s cadência</div>
+                </div>
+              </div>
+
+              {/* Tactical Description */}
+              <div className="rounded-lg border border-white/5 bg-black/35 px-2.5 py-1.5 text-[11px] leading-snug text-slate-300">
+                <span className="mr-1 font-semibold text-white/70">Função tática:</span>
+                {spec.role}
+              </div>
+            </div>
+          );
+        })()}
+
         {(() => {
           const unlockedAllies = getUnlockedAlliesForStage(
             Math.max(hud.stage, hud.highestUnlockedStage)
@@ -532,6 +631,11 @@ export const GameHUD: React.FC<GameHUDProps> = ({
                   <div
                     key={kind}
                     data-testid={`dock-unit-${kind}`}
+                    onMouseEnter={() => setHoveredUnitKind(kind)}
+                    onMouseLeave={() => setHoveredUnitKind(null)}
+                    onFocus={() => setHoveredUnitKind(kind)}
+                    onBlur={() => setHoveredUnitKind(null)}
+                    onPointerDown={() => setHoveredUnitKind(null)}
                     className={`flex shrink-0 items-center gap-1.5 rounded-xl border-2 px-2 py-1.5 transition-colors sm:gap-2 sm:px-2.5 ${
                       isSelected
                         ? 'border-[#FACC15] bg-[#1E293B]'

@@ -58,6 +58,7 @@ export interface EnemyCatalogEntry {
   radius: number;
   damage: number;
   isBoss?: boolean;
+  isElite?: boolean;
 }
 
 export interface AllyCatalogEntry {
@@ -297,6 +298,8 @@ export interface UnitEntity {
 export interface EnemyEntity {
   id: number;
   kind: EnemyKind;
+  isBoss?: boolean;
+  isElite?: boolean;
   catalogId?: number;
   displayName?: string;
   primaryColor?: string;

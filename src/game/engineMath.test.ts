@@ -39,11 +39,13 @@ import {
   getHeroStatsForLevel,
   getStageConfig,
   isValidFreeHeroPosition,
+  isEliteEnemy,
   pointToSegmentDistance,
   pushEnemyBackAlongRoute,
   rollCriticalHit,
   unlockNextStage,
 } from './engineMath';
+import { GameSimulation } from './simulation';
 import { generateConvergenceStages } from './storage';
 import {
   DEFAULT_ARENA,
@@ -554,3 +556,117 @@ test('findSlotAtPoint resolves clicked slot coordinates cleanly', () => {
   assert.equal(found?.id, target.id);
   assert.equal(findSlotAtPoint(10, 10, slots), null);
 });
+
+test('GameSimulation spawns floating damage numbers on enemy hits', () => {
+  const sim = new GameSimulation();
+  sim.resetWorld('playing', 1, 'archer');
+  const enemy = makeEnemy({ x: 500, y: 410, hp: 50, maxHp: 50 });
+  sim.enemies.push(enemy);
+
+  sim.projectiles.push({
+    id: 999,
+    x: 500,
+    y: 410,
+    vx: 0,
+    vy: 0,
+    radius: 8,
+    damage: 25,
+    critChance: 0,
+    color: '#00D4FF',
+    trailColor: '#BAE6FD',
+    targetEnemyId: enemy.id,
+    life: 1,
+    isShockwave: false,
+  });
+
+  sim.update(0.1);
+
+  assert.ok(sim.floatingTexts.length > 0, 'Should spawn floating damage text on enemy hit');
+  const dmgText = sim.floatingTexts.find((ft) => ft.text.includes('-'));
+  assert.ok(dmgText, 'Floating text should contain damage value');
+});
+
+test('isEliteEnemy classifies elite enemy kinds and flags accurately', () => {
+  assert.equal(isEliteEnemy({ kind: 'titan' }), true);
+  assert.equal(isEliteEnemy({ kind: 'reaper' }), true);
+  assert.equal(isEliteEnemy({ kind: 'brute' }), true);
+  assert.equal(isEliteEnemy({ kind: 'walker', isElite: true }), true);
+  assert.equal(isEliteEnemy({ kind: 'walker' }), false);
+  assert.equal(isEliteEnemy({ kind: 'boss', isBoss: true }), false);
+});
+
+test('defeating an elite enemy triggers subtle screenshake cameraTrauma and combat feedback', () => {
+  const sim = new GameSimulation();
+  sim.resetWorld('playing', 1, 'archer');
+  sim.cameraTrauma = 0;
+
+  const eliteEnemy = makeEnemy({
+    id: 888,
+    kind: 'titan',
+    isElite: true,
+    hp: 10,
+    maxHp: 200,
+    x: 500,
+    y: 410,
+  });
+  sim.enemies.push(eliteEnemy);
+
+  // Directly land a lethal blow on elite enemy
+  sim.projectiles.push({
+    id: 998,
+    x: 500,
+    y: 410,
+    vx: 0,
+    vy: 0,
+    radius: 8,
+    damage: 30,
+    critChance: 0,
+    color: '#00D4FF',
+    trailColor: '#BAE6FD',
+    targetEnemyId: eliteEnemy.id,
+    life: 1,
+    isShockwave: false,
+  });
+
+  sim.update(0.1);
+
+  assert.equal(eliteEnemy.isDead, true, 'Elite enemy should be defeated');
+  assert.ok(sim.cameraTrauma >= 0.35, `cameraTrauma should have subtle screenshake, got ${sim.cameraTrauma}`);
+  const eliteFeedback = sim.floatingTexts.find((ft) => ft.text.includes('ELITE DERROTADO'));
+  assert.ok(eliteFeedback, 'Should display ELITE DERROTADO feedback');
+});
+
+test('all UNIT_SPECS define valid damage, range, and attack speed for tooltip overlays', () => {
+  const kinds = Object.keys(UNIT_SPECS) as (keyof typeof UNIT_SPECS)[];
+  assert.ok(kinds.length >= 10, 'Should have all unlocked ally unit specs');
+
+  for (const kind of kinds) {
+    const spec = UNIT_SPECS[kind];
+    assert.ok(spec.name.length > 0, `${kind} must have a name`);
+    assert.ok(spec.damage > 0, `${kind} damage must be greater than 0, got ${spec.damage}`);
+    assert.ok(spec.range > 0, `${kind} range must be greater than 0, got ${spec.range}`);
+    assert.ok(spec.cooldown > 0, `${kind} cooldown must be greater than 0, got ${spec.cooldown}`);
+    const attackSpeed = 1 / spec.cooldown;
+    assert.ok(Number.isFinite(attackSpeed) && attackSpeed > 0, `${kind} attack speed must be finite and positive`);
+    assert.ok(spec.shortRole.length > 0, `${kind} shortRole must be non-empty`);
+    assert.ok(spec.role.length > 0, `${kind} role must be non-empty`);
+  }
+
+  // Verify specific tooltip values
+  const scoutSpec = UNIT_SPECS.scout;
+  assert.equal(scoutSpec.damage, 11);
+  assert.equal(scoutSpec.range, 265);
+  assert.equal((1 / scoutSpec.cooldown).toFixed(1), '1.7');
+
+  const sniperSpec = UNIT_SPECS.sniper;
+  assert.equal(sniperSpec.damage, 78);
+  assert.equal(sniperSpec.range, 460);
+  assert.equal((1 / sniperSpec.cooldown).toFixed(1), '0.8');
+
+  // Verify Paladin aura bonus damage calculation (+25%)
+  const boostedScoutDamage = Math.round(scoutSpec.damage * 1.25);
+  assert.equal(boostedScoutDamage, 14);
+});
+
+
+

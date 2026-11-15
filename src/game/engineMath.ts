@@ -1545,6 +1545,11 @@ export function getEnemyResistanceMultiplier(
   return baseMult;
 }
 
+export function isEliteEnemy(enemy: { kind: EnemyKind; isElite?: boolean; isBoss?: boolean }): boolean {
+  if (enemy.isBoss || enemy.kind === 'boss') return false;
+  return Boolean(enemy.isElite) || enemy.kind === 'titan' || enemy.kind === 'reaper' || enemy.kind === 'brute';
+}
+
 export function applyDamageToEnemy(
   enemy: EnemyEntity,
   rawDamage: number,

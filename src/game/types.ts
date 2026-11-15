@@ -2,9 +2,80 @@ export type GamePhase = 'title' | 'playing' | 'paused' | 'victory' | 'gameover';
 
 export type HeroClass = 'archer' | 'swordsman' | 'bomber';
 
-export type UnitKind = 'scout' | 'shield' | 'frog';
+export type UnitKind =
+  | 'scout'
+  | 'frog'
+  | 'swordsman_ally'
+  | 'fire_mage'
+  | 'cleric'
+  | 'shadow_assassin'
+  | 'sniper'
+  | 'golem'
+  | 'spore_witch'
+  | 'paladin'
+  | 'shield';
 
-export type EnemyKind = 'walker' | 'shielded' | 'brute' | 'boss';
+export type EnemyKind =
+  | 'walker'
+  | 'shielded'
+  | 'brute'
+  | 'stalker'
+  | 'pyro'
+  | 'titan'
+  | 'reaper'
+  | 'boss';
+
+export type EnemyArchetype =
+  | 'beast'
+  | 'slime'
+  | 'goblin'
+  | 'undead'
+  | 'arachnid'
+  | 'demon'
+  | 'construct'
+  | 'spirit'
+  | 'orc'
+  | 'mythic'
+  | 'boss';
+
+export interface EnemyCatalogEntry {
+  id: number;
+  code: string;
+  name: string;
+  hp: number;
+  unlockStage: number;
+  story: string;
+  mysteryPreview: string;
+  specialty: string;
+  counterAllyId: number;
+  engineKind: EnemyKind;
+  archetype: EnemyArchetype;
+  visualVariant: string;
+  primaryColor: string;
+  secondaryColor: string;
+  accentColor: string;
+  baseSpeed: number;
+  radius: number;
+  damage: number;
+  isBoss?: boolean;
+}
+
+export interface AllyCatalogEntry {
+  id: number;
+  code: string;
+  unitKind: UnitKind;
+  name: string;
+  title: string;
+  colorName: string;
+  colorHex: string;
+  accentHex: string;
+  bgHex: string;
+  unlockStage: number;
+  specialty: string;
+  story: string;
+  mysteryPreview: string;
+  hotkey: string;
+}
 
 export type SpellKind = 'blade' | 'shockwave' | 'overcharge';
 
@@ -12,15 +83,71 @@ export type ParticleKind = 'circle' | 'smoke' | 'grass' | 'spark';
 
 export type RewardTone = 'gold' | 'electric' | 'crimson';
 
-export const MAX_UNIT_LEVEL = 4;
-export const MAX_HERO_LEVEL = 6;
-export const TOTAL_STAGES = 10;
+export type HeroUpgradeId = 'power' | 'haste' | 'fortress' | 'area';
 
-export const HERO_XP_THRESHOLDS: ReadonlyArray<number> = [0, 45, 110, 200, 320, 480];
+export interface HeroUpgradeOption {
+  id: HeroUpgradeId;
+  title: string;
+  effectText: string;
+  accent: RewardTone;
+}
+
+export const HERO_UPGRADE_CATALOG: Record<HeroUpgradeId, HeroUpgradeOption> = {
+  power: {
+    id: 'power',
+    title: 'Poder Bruto',
+    effectText: '+28% Dano do Herói e +6% Crítico',
+    accent: 'crimson',
+  },
+  haste: {
+    id: 'haste',
+    title: 'Ritmo Veloz',
+    effectText: '+22% Cadência e +10% Alcance',
+    accent: 'electric',
+  },
+  fortress: {
+    id: 'fortress',
+    title: 'Muralha & Tropas',
+    effectText: '+25 HP Máx., cura +30 HP e +18% Dano Tropas',
+    accent: 'gold',
+  },
+  area: {
+    id: 'area',
+    title: 'Impacto Amplo',
+    effectText: '+24% Área/Recuo e +15% Dano Especial',
+    accent: 'gold',
+  },
+};
+
+export const MAX_UNIT_LEVEL = 4;
+export const MAX_HERO_LEVEL = 30;
+export const TOTAL_STAGES = 150;
+
+export const HERO_XP_THRESHOLDS: ReadonlyArray<number> = [
+  0, 35, 75, 125, 190, 270, 365, 475, 600, 740,
+  900, 1080, 1280, 1500, 1750, 2030, 2340, 2680, 3050, 3450,
+  3880, 4340, 4830, 5350, 5900, 6480, 7090, 7730, 8400, 9100,
+];
+
+export interface HeroSaveData {
+  level: number;
+  xp: number;
+  kills: number;
+  upgradeChoices: HeroUpgradeId[];
+}
 
 export interface RouteWaypoint {
   x: number;
   y: number;
+}
+
+export interface RouteBranch {
+  id: string;
+  gateIndex: number;
+  label: string;
+  unlockRouteLevel: number;
+  color: string;
+  waypoints: ReadonlyArray<RouteWaypoint>;
 }
 
 export interface SlotCoord {
@@ -36,22 +163,33 @@ export interface StageRouteDefinition {
   title: string;
   routeArchetype: string;
   waypoints: ReadonlyArray<RouteWaypoint>;
+  routes: ReadonlyArray<RouteBranch>;
+  initialRouteLevel: number;
   castleX: number;
   castleY: number;
   slots: ReadonlyArray<SlotCoord>;
   heroStartSlotId: string;
+  trioStartSlotIds?: ReadonlyArray<string>;
 }
 
 export interface StageConfig {
   stage: number;
   title: string;
   routeArchetype: string;
+  routeCount: number;
+  initialRouteLevel: number;
+  isConvergenceStage: boolean;
   totalWaves: number;
   baseEnemiesPerWave: number;
   hpMultiplier: number;
   speedMultiplier: number;
   spawnInterval: number;
   bossHp: number;
+  isFiveLevelMilestone: boolean;
+  unlockedEnemyLabel?: string;
+  unlockedEnemyId?: number;
+  unlockedAllyLabel?: string;
+  unlockedAllyId?: number;
 }
 
 export interface ArenaConfig {
@@ -65,6 +203,7 @@ export interface ArenaConfig {
   castleRadius: number;
   roadHalfWidth: number;
   waypoints: ReadonlyArray<RouteWaypoint>;
+  routes: ReadonlyArray<RouteBranch>;
 }
 
 export interface ArenaSlot {
@@ -100,12 +239,13 @@ export interface HeroSpec {
 
 export interface HeroEntity {
   heroClass: HeroClass;
-  slotId: string;
+  slotId: string | null;
   x: number;
   y: number;
   level: number;
   xp: number;
   kills: number;
+  upgradeChoices?: HeroUpgradeId[];
   range: number;
   damage: number;
   cooldown: number;
@@ -157,6 +297,11 @@ export interface UnitEntity {
 export interface EnemyEntity {
   id: number;
   kind: EnemyKind;
+  catalogId?: number;
+  displayName?: string;
+  primaryColor?: string;
+  secondaryColor?: string;
+  accentColor?: string;
   x: number;
   y: number;
   vx: number;
@@ -174,6 +319,7 @@ export interface EnemyEntity {
   xpReward: number;
   walkPhase: number;
   distanceTraveled: number;
+  routeIndex: number;
   waypointIndex: number;
   laneOffset: number;
   pathProgress: number;
@@ -181,6 +327,8 @@ export interface EnemyEntity {
   knockbackVx: number;
   knockbackVy: number;
   stunTimer: number;
+  slowTimer?: number;
+  corrosionTimer?: number;
   koTimer: number;
   isDead: boolean;
   bracingTimer: number;
@@ -202,6 +350,10 @@ export interface ProjectileEntity {
   targetEnemyId: number;
   life: number;
   isShockwave: boolean;
+  isPiercing?: boolean;
+  hitIds?: number[];
+  appliesSlow?: boolean;
+  appliesCorrosion?: boolean;
   isHeroAttack?: boolean;
   isBomb?: boolean;
   blastRadius?: number;
@@ -257,6 +409,7 @@ export interface HordeWarningIndicator {
   x: number;
   y: number;
   angle: number;
+  routeIndex: number;
   timer: number;
   maxTimer: number;
   spawnCount: number;
@@ -304,7 +457,9 @@ export interface RewardBanner {
 export interface DragState {
   source: 'unit' | 'card' | 'hero';
   unitId?: number;
-  fromSlotId?: string;
+  heroClass?: HeroClass;
+  heroIndex?: number;
+  fromSlotId?: string | null;
   kind: UnitKind;
   level: number;
   worldX: number;
@@ -321,6 +476,18 @@ export interface SpellState {
   overchargeTimer: number;
 }
 
+export interface ActiveHeroSummary {
+  heroClass: HeroClass;
+  level: number;
+  xp: number;
+  currentLevelXp: number;
+  nextLevelXp: number;
+  kills: number;
+  x: number;
+  y: number;
+  isFreePlaced: boolean;
+}
+
 export interface HudSnapshot {
   phase: GamePhase;
   stage: number;
@@ -328,17 +495,27 @@ export interface HudSnapshot {
   stageTitle: string;
   totalWavesInStage: number;
   highestUnlockedStage: number;
+  isConvergenceStage: boolean;
+  nextConvergenceStage: number;
+  routeLevel: number;
+  maxRouteLevel: number;
+  openGatesCount: number;
   baseHp: number;
   baseMaxHp: number;
   baseLevel: number;
   essence: number;
   essenceCollected: number;
+  evolutionPoints: number;
+  lastEarnedEvolutionPoints: number;
   score: number;
   bestScore: number;
   wave: number;
   kills: number;
   survivalSeconds: number;
   selectedHeroClass: HeroClass;
+  heroRoster: Record<HeroClass, HeroSaveData>;
+  activeHeroes: ActiveHeroSummary[];
+  activeHeroIndex: number;
   heroLevel: number;
   heroXp: number;
   heroCurrentLevelXp: number;
@@ -359,6 +536,11 @@ export interface HudSnapshot {
   targetingSpell: SpellKind | null;
   overchargeTimer: number;
   bossActive: boolean;
+  pendingUpgradeChoices: HeroUpgradeOption[] | null;
+  pendingUpgradeMilestoneLevel: number | null;
+  pendingUpgradeHeroClass: HeroClass | null;
+  heroUpgradesCount: number;
+  paladinAuraActive: boolean;
 }
 
 export const HERO_SPECS: Record<HeroClass, HeroSpec> = {
@@ -367,11 +549,11 @@ export const HERO_SPECS: Record<HeroClass, HeroSpec> = {
     name: 'Arqueiro',
     title: 'Mestre da Precisão',
     shortRole: 'Alta velocidade à distância',
-    description: 'Disparos elétricos velozes, longo alcance e rajadas múltiplas ao evoluir.',
+    description: 'Começa com disparos leves e rápidos; ganha poder e múltiplas flechas ao evoluir.',
     range: 345,
-    damage: 24,
-    cooldown: 0.42,
-    critChance: 0.28,
+    damage: 9,
+    cooldown: 0.48,
+    critChance: 0.14,
     blastRadius: 0,
     cleaveHalfAngle: 0,
     color: '#00D4FF',
@@ -385,12 +567,12 @@ export const HERO_SPECS: Record<HeroClass, HeroSpec> = {
     heroClass: 'swordsman',
     name: 'Espadachim',
     title: 'Lâmina Carmesim',
-    shortRole: 'Dano corpo a corpo massivo',
-    description: 'Golpes em arco devastadores com dano crítico alto e recuo de inimigos próximos.',
+    shortRole: 'Dano corpo a corpo firme',
+    description: 'Cortes em arco equilibrados no início; escala para golpes críticos brutais com XP.',
     range: 195,
-    damage: 58,
-    cooldown: 0.72,
-    critChance: 0.34,
+    damage: 16,
+    cooldown: 0.8,
+    critChance: 0.18,
     blastRadius: 0,
     cleaveHalfAngle: Math.PI * 0.68,
     color: '#FF2E4C',
@@ -405,12 +587,12 @@ export const HERO_SPECS: Record<HeroClass, HeroSpec> = {
     name: 'Bombardeiro',
     title: 'Artífice Explosivo',
     shortRole: 'Explosões em área de grupo',
-    description: 'Lança bombas de impacto que pulverizam grupos inteiros na rota.',
+    description: 'Bombas de impacto moderado no nível 1 que crescem em área e potência a cada nível.',
     range: 290,
-    damage: 44,
-    cooldown: 1.08,
-    critChance: 0.22,
-    blastRadius: 102,
+    damage: 13,
+    cooldown: 1.16,
+    critChance: 0.12,
+    blastRadius: 94,
     cleaveHalfAngle: 0,
     color: '#F59E0B',
     accentColor: '#EF4444',
@@ -439,6 +621,16 @@ export const DEFAULT_ARENA: ArenaConfig = {
   castleRadius: 42,
   roadHalfWidth: 30,
   waypoints: DEFAULT_ROUTE_WAYPOINTS,
+  routes: [
+    {
+      id: 'r1',
+      gateIndex: 1,
+      label: 'Portão Oeste',
+      unlockRouteLevel: 1,
+      color: '#FF2E4C',
+      waypoints: DEFAULT_ROUTE_WAYPOINTS,
+    },
+  ],
 };
 
 export const SPELL_SPECS: Record<
@@ -470,16 +662,151 @@ export const UNIT_SPECS: Record<UnitKind, UnitSpec> = {
     kind: 'scout',
     name: 'Batedor',
     shortRole: 'Tiro rápido',
-    role: 'Tiro rápido à distância',
+    role: 'Ataques rápidos de longo alcance contra alvos ágeis',
     cost: 30,
-    maxHp: 75,
-    range: 255,
-    damage: 15,
+    maxHp: 80,
+    range: 265,
+    damage: 11,
     cooldown: 0.6,
-    critChance: 0.18,
+    critChance: 0.16,
     color: '#00D4FF',
-    accentColor: '#FF2E4C',
+    accentColor: '#FACC15',
     hotkey: '1',
+  },
+  frog: {
+    kind: 'frog',
+    name: 'Sapo Lâmina',
+    shortRole: 'Ácido em área',
+    role: 'Dano de veneno em área e corrosão de armaduras pesadas',
+    cost: 48,
+    maxHp: 135,
+    range: 185,
+    damage: 34,
+    cooldown: 0.82,
+    critChance: 0.24,
+    color: '#10B981',
+    accentColor: '#A3E635',
+    hotkey: '2',
+  },
+  swordsman_ally: {
+    kind: 'swordsman_ally',
+    name: 'Espadachim',
+    shortRole: 'Corte brutal',
+    role: 'Dano corpo a corpo massivo e resistência contra chefes',
+    cost: 55,
+    maxHp: 210,
+    range: 170,
+    damage: 48,
+    cooldown: 0.88,
+    critChance: 0.3,
+    color: '#DC2626',
+    accentColor: '#FCA5A5',
+    hotkey: '3',
+  },
+  fire_mage: {
+    kind: 'fire_mage',
+    name: 'Mago de Fogo',
+    shortRole: 'Chama reta',
+    role: 'Queima hordas inteiras em linha reta na rota',
+    cost: 65,
+    maxHp: 110,
+    range: 280,
+    damage: 38,
+    cooldown: 1.05,
+    critChance: 0.2,
+    color: '#F97316',
+    accentColor: '#FACC15',
+    hotkey: '4',
+  },
+  cleric: {
+    kind: 'cleric',
+    name: 'Clérigo Protetor',
+    shortRole: 'Cura castelo',
+    role: 'Restaura o HP do castelo e protege aliados próximos',
+    cost: 70,
+    maxHp: 160,
+    range: 240,
+    damage: 24,
+    cooldown: 1.15,
+    critChance: 0.16,
+    color: '#FEF3C7',
+    accentColor: '#FACC15',
+    hotkey: '5',
+  },
+  shadow_assassin: {
+    kind: 'shadow_assassin',
+    name: 'Assassino de Sombras',
+    shortRole: 'Crítico letal',
+    role: 'Acertos críticos letais em inimigos isolados',
+    cost: 80,
+    maxHp: 125,
+    range: 230,
+    damage: 54,
+    cooldown: 0.72,
+    critChance: 0.58,
+    color: '#581C87',
+    accentColor: '#C084FC',
+    hotkey: '6',
+  },
+  sniper: {
+    kind: 'sniper',
+    name: 'Atirador de Elite',
+    shortRole: 'Alcance máx.',
+    role: 'Alcance máximo absoluto com dano perfurante',
+    cost: 90,
+    maxHp: 105,
+    range: 460,
+    damage: 78,
+    cooldown: 1.28,
+    critChance: 0.35,
+    color: '#06B6D4',
+    accentColor: '#E0F2FE',
+    hotkey: '7',
+  },
+  golem: {
+    kind: 'golem',
+    name: 'Golem Defensor',
+    shortRole: 'Tanque peso',
+    role: 'Tanque intransponível que bloqueia o avanço inimigo na rota',
+    cost: 95,
+    maxHp: 340,
+    range: 165,
+    damage: 42,
+    cooldown: 1.12,
+    critChance: 0.14,
+    color: '#64748B',
+    accentColor: '#CBD5E1',
+    hotkey: '8',
+  },
+  spore_witch: {
+    kind: 'spore_witch',
+    name: 'Bruxa dos Esporos',
+    shortRole: 'Lentidão global',
+    role: 'Lenta o movimento de todos os inimigos na tela',
+    cost: 105,
+    maxHp: 130,
+    range: 310,
+    damage: 32,
+    cooldown: 1.15,
+    critChance: 0.2,
+    color: '#65A30D',
+    accentColor: '#BEF264',
+    hotkey: '9',
+  },
+  paladin: {
+    kind: 'paladin',
+    name: 'Paladino Supremo',
+    shortRole: 'Aura +20% dano',
+    role: 'O herói definitivo com bônus de dano universal para toda a tropa',
+    cost: 130,
+    maxHp: 280,
+    range: 245,
+    damage: 85,
+    cooldown: 0.85,
+    critChance: 0.32,
+    color: '#EAB308',
+    accentColor: '#FEF08A',
+    hotkey: '0',
   },
   shield: {
     kind: 'shield',
@@ -495,20 +822,5 @@ export const UNIT_SPECS: Record<UnitKind, UnitSpec> = {
     color: '#2563EB',
     accentColor: '#FACC15',
     hotkey: '2',
-  },
-  frog: {
-    kind: 'frog',
-    name: 'Sapo Lâmina',
-    shortRole: 'Corte área',
-    role: 'Corte esmeralda em área',
-    cost: 70,
-    maxHp: 130,
-    range: 175,
-    damage: 44,
-    cooldown: 0.82,
-    critChance: 0.26,
-    color: '#22C55E',
-    accentColor: '#FACC15',
-    hotkey: '3',
   },
 };

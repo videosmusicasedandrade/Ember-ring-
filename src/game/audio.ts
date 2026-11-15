@@ -481,6 +481,84 @@ class SoundEngine {
     osc.start(now);
     osc.stop(now + 0.22);
   }
+
+  public playHeroEvolve() {
+    const ctx = this.getSfxCtx();
+    if (!ctx) return;
+    const now = ctx.currentTime;
+    // Deep confirmation pulse + crystalline ascending triad
+    const sub = ctx.createOscillator();
+    const subGain = ctx.createGain();
+    sub.type = 'sine';
+    sub.frequency.setValueAtTime(160, now);
+    sub.frequency.exponentialRampToValueAtTime(80, now + 0.18);
+    subGain.gain.setValueAtTime(0.15, now);
+    subGain.gain.exponentialRampToValueAtTime(0.001, now + 0.2);
+    sub.connect(subGain).connect(ctx.destination);
+    sub.start(now);
+    sub.stop(now + 0.21);
+
+    [587.33, 880, 1174.66, 1760].forEach((freq, idx) => {
+      const osc = ctx.createOscillator();
+      const gain = ctx.createGain();
+      osc.type = idx === 3 ? 'sine' : 'triangle';
+      const t = now + idx * 0.048;
+      osc.frequency.setValueAtTime(freq, t);
+      gain.gain.setValueAtTime(0.095, t);
+      gain.gain.exponentialRampToValueAtTime(0.001, t + 0.28);
+      osc.connect(gain).connect(ctx.destination);
+      osc.start(t);
+      osc.stop(t + 0.3);
+    });
+  }
+
+  public playGateOpen() {
+    const ctx = this.getSfxCtx();
+    if (!ctx) return;
+    const now = ctx.currentTime;
+    // Dramatic gate breach horn + resonant chime
+    const rumble = ctx.createOscillator();
+    const rGain = ctx.createGain();
+    rumble.type = 'sawtooth';
+    rumble.frequency.setValueAtTime(110, now);
+    rumble.frequency.exponentialRampToValueAtTime(65, now + 0.35);
+    rGain.gain.setValueAtTime(0.12, now);
+    rGain.gain.exponentialRampToValueAtTime(0.001, now + 0.38);
+    rumble.connect(rGain).connect(ctx.destination);
+    rumble.start(now);
+    rumble.stop(now + 0.4);
+
+    [392.0, 523.25].forEach((freq, i) => {
+      const osc = ctx.createOscillator();
+      const gain = ctx.createGain();
+      osc.type = 'triangle';
+      const t = now + 0.08 + i * 0.09;
+      osc.frequency.setValueAtTime(freq, t);
+      gain.gain.setValueAtTime(0.11, t);
+      gain.gain.exponentialRampToValueAtTime(0.001, t + 0.32);
+      osc.connect(gain).connect(ctx.destination);
+      osc.start(t);
+      osc.stop(t + 0.34);
+    });
+  }
+
+  public playConvergenceAlert() {
+    const ctx = this.getSfxCtx();
+    if (!ctx) return;
+    const now = ctx.currentTime;
+    [440, 554.37, 659.25, 880, 1108.73].forEach((freq, i) => {
+      const osc = ctx.createOscillator();
+      const gain = ctx.createGain();
+      osc.type = 'triangle';
+      const t = now + i * 0.065;
+      osc.frequency.setValueAtTime(freq, t);
+      gain.gain.setValueAtTime(0.1, t);
+      gain.gain.exponentialRampToValueAtTime(0.001, t + 0.36);
+      osc.connect(gain).connect(ctx.destination);
+      osc.start(t);
+      osc.stop(t + 0.38);
+    });
+  }
 }
 
 export const soundEngine = new SoundEngine();

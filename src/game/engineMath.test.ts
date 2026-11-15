@@ -1,6 +1,14 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import {
+  ALLY_ALBUM,
+  ENEMY_ALBUM,
+  getUnlockedAlliesForStage,
+  getUnlockedEnemiesForStage,
+  isAllyUnlocked,
+  isEnemyUnlocked,
+} from './bestiaryData';
+import {
   STAGE_ROUTES,
   advanceEnemyAlongRoute,
   applyDamageToBase,
@@ -12,24 +20,31 @@ import {
   buildArenaSlots,
   canMergeUnits,
   circlesCollide,
+  computeEnemyEssenceReward,
   computeRadialKnockbackVector,
   computeRouteSpawnPoint,
   computeRouteTotalLength,
   computeViewportTransform,
   computeWaveConfig,
+  crossedHeroUpgradeMilestone,
   findBlockingUnitForEnemy,
   findEnemiesInSlashArc,
   findNearestEnemyInRange,
   findSlotAtPoint,
   formatSurvivalTime,
+  getEnemyResistanceMultiplier,
+  getHeroEvolutionCost,
   getHeroLevelFromXp,
+  getHeroRankTitle,
   getHeroStatsForLevel,
   getStageConfig,
+  isValidFreeHeroPosition,
   pointToSegmentDistance,
   pushEnemyBackAlongRoute,
   rollCriticalHit,
   unlockNextStage,
 } from './engineMath';
+import { generateConvergenceStages } from './storage';
 import {
   DEFAULT_ARENA,
   EnemyEntity,
@@ -63,6 +78,7 @@ function makeEnemy(overrides: Partial<EnemyEntity> = {}): EnemyEntity {
     xpReward: 10,
     walkPhase: 0,
     distanceTraveled: 0,
+    routeIndex: 0,
     waypointIndex: 1,
     laneOffset: 0,
     pathProgress: 0,
@@ -116,61 +132,128 @@ test('computeViewportTransform adapts to both landscape and portrait without dis
   assert.equal(Math.round(screenCenterY), 422);
 });
 
-test('all 10 stages have distinct routes and non-overlapping slots clear of the road', () => {
-  assert.equal(STAGE_ROUTES.length, TOTAL_STAGES);
+test('all 150 stages (including Convergence) have valid 1-4 routes and non-overlapping slots clear of all roads', () => {
+  assert.equal(STAGE_ROUTES.length, 16);
+  assert.equal(TOTAL_STAGES, 150);
 
-  const routeSignatures = new Set<string>();
+  const routeCounts = new Set(STAGE_ROUTES.map((r) => r.routes.length));
+  assert.deepEqual([...routeCounts].sort((a, b) => a - b), [1, 2, 3, 4]);
+
+  const stage1Sig = buildArenaForStage(1).waypoints.map((w) => `${w.x},${w.y}`).join('->');
+  const stage2Sig = buildArenaForStage(2).waypoints.map((w) => `${w.x},${w.y}`).join('->');
+  assert.notEqual(stage1Sig, stage2Sig);
+
   for (let stage = 1; stage <= TOTAL_STAGES; stage++) {
-    const arena = buildArenaForStage(stage);
-    const slots = buildArenaSlots(arena);
-    assert.ok(slots.length >= 12, `Stage ${stage} should have >= 12 tactical slots`);
-
-    const sig = arena.waypoints.map((w) => `${w.x},${w.y}`).join('->');
-    assert.equal(routeSignatures.has(sig), false, `Stage ${stage} repeated a route!`);
-    routeSignatures.add(sig);
-
-    for (const s of slots) {
-      let minRoadDist = Infinity;
-      for (let i = 0; i < arena.waypoints.length - 1; i++) {
-        const d = pointToSegmentDistance(
-          s.x,
-          s.y,
-          arena.waypoints[i].x,
-          arena.waypoints[i].y,
-          arena.waypoints[i + 1].x,
-          arena.waypoints[i + 1].y
-        );
-        if (d < minRoadDist) minRoadDist = d;
+    for (const isConv of [false, true]) {
+      const arena = buildArenaForStage(stage, isConv);
+      const slots = buildArenaSlots(arena, isConv);
+      assert.ok(slots.length >= 12, `Stage ${stage} should have >= 12 tactical slots`);
+      assert.ok(arena.routes.length >= 1 && arena.routes.length <= 4);
+      if (isConv) {
+        assert.ok(arena.routes.length >= 3, `Convergence stage ${stage} must have >= 3 routes`);
       }
-      assert.ok(
-        minRoadDist >= arena.roadHalfWidth + 24,
-        `Stage ${stage} slot ${s.id} too close to road (${minRoadDist.toFixed(1)}px)`
-      );
-      assert.ok(s.x >= 90 && s.x <= 1080 && s.y >= 145 && s.y <= 665, `Stage ${stage} slot ${s.id} out of safe HUD bounds`);
-    }
 
-    for (let i = 0; i < slots.length; i++) {
-      for (let j = i + 1; j < slots.length; j++) {
-        const d = Math.hypot(slots[i].x - slots[j].x, slots[i].y - slots[j].y);
+      for (const s of slots) {
+        let minRoadDist = Infinity;
+        for (const branch of arena.routes) {
+          for (let i = 0; i < branch.waypoints.length - 1; i++) {
+            const d = pointToSegmentDistance(
+              s.x,
+              s.y,
+              branch.waypoints[i].x,
+              branch.waypoints[i].y,
+              branch.waypoints[i + 1].x,
+              branch.waypoints[i + 1].y
+            );
+            if (d < minRoadDist) minRoadDist = d;
+          }
+        }
         assert.ok(
-          d >= 70,
-          `Stage ${stage} slots ${slots[i].id} and ${slots[j].id} overlap (${d.toFixed(1)}px)`
+          minRoadDist >= arena.roadHalfWidth + 24,
+          `Stage ${stage} (conv=${isConv}) slot ${s.id} too close to road (${minRoadDist.toFixed(1)}px)`
         );
+        assert.ok(
+          s.x >= 90 && s.x <= 1080 && s.y >= 145 && s.y <= 665,
+          `Stage ${stage} slot ${s.id} out of safe HUD bounds (${s.x}, ${s.y})`
+        );
+      }
+
+      for (let i = 0; i < slots.length; i++) {
+        for (let j = i + 1; j < slots.length; j++) {
+          const d = Math.hypot(slots[i].x - slots[j].x, slots[i].y - slots[j].y);
+          assert.ok(
+            d >= 70,
+            `Stage ${stage} slots ${slots[i].id} and ${slots[j].id} overlap (${d.toFixed(1)}px)`
+          );
+        }
       }
     }
   }
 });
 
-test('Hero XP progression scales level, attack power, range, and caps at MAX_HERO_LEVEL', () => {
+test('Enemy Album (50) unlocks every 2-5 stages and Ally Album (10) unlocks every 5-10 stages', () => {
+  assert.equal(ENEMY_ALBUM.length, 50);
+  assert.equal(ENEMY_ALBUM[0].name, 'Rato de Esgoto');
+  assert.equal(ENEMY_ALBUM[0].hp, 50);
+  assert.equal(ENEMY_ALBUM[0].unlockStage, 1);
+  assert.equal(ENEMY_ALBUM[49].name, 'O Deus Esquecido (Chefe Final)');
+  assert.equal(ENEMY_ALBUM[49].hp, 25000);
+  assert.equal(ENEMY_ALBUM[49].unlockStage, 150);
+
+  for (let i = 1; i < ENEMY_ALBUM.length; i++) {
+    const gap = ENEMY_ALBUM[i].unlockStage - ENEMY_ALBUM[i - 1].unlockStage;
+    assert.ok(
+      gap >= 2 && gap <= 5,
+      `Enemy ${ENEMY_ALBUM[i].code} gap ${gap} must be between 2 and 5 stages`
+    );
+  }
+
+  assert.equal(ALLY_ALBUM.length, 10);
+  assert.equal(ALLY_ALBUM[0].name, 'Batedor');
+  assert.equal(ALLY_ALBUM[0].unlockStage, 1);
+  assert.equal(ALLY_ALBUM[9].name, 'Paladino Supremo');
+
+  for (let i = 1; i < ALLY_ALBUM.length; i++) {
+    const gap = ALLY_ALBUM[i].unlockStage - ALLY_ALBUM[i - 1].unlockStage;
+    assert.ok(
+      gap >= 5 && gap <= 10,
+      `Ally ${ALLY_ALBUM[i].code} gap ${gap} must be between 5 and 10 stages`
+    );
+  }
+
+  assert.equal(isEnemyUnlocked(ENEMY_ALBUM[0], 1), true);
+  assert.equal(isEnemyUnlocked(ENEMY_ALBUM[1], 1), false);
+  assert.equal(getUnlockedEnemiesForStage(1).length, 1);
+  assert.equal(getUnlockedEnemiesForStage(150).length, 50);
+
+  assert.equal(isAllyUnlocked(ALLY_ALBUM[0], 1), true);
+  assert.equal(isAllyUnlocked(ALLY_ALBUM[1], 5), false);
+  assert.equal(isAllyUnlocked(ALLY_ALBUM[1], 6), true);
+  assert.equal(getUnlockedAlliesForStage(1).length, 1);
+  assert.equal(getUnlockedAlliesForStage(79).length, 10);
+});
+
+test('Hero Lv 1 base damage requires 3-6 hits on common enemies and scales strongly with XP levels', () => {
   assert.equal(getHeroLevelFromXp(0), 1);
   assert.equal(getHeroLevelFromXp(HERO_XP_THRESHOLDS[1]), 2);
   assert.equal(getHeroLevelFromXp(9999), MAX_HERO_LEVEL);
 
-  const stats1 = getHeroStatsForLevel('archer', 1);
-  const stats4 = getHeroStatsForLevel('archer', 4);
-  assert.ok(stats4.damage > stats1.damage);
-  assert.ok(stats4.cooldown < stats1.cooldown);
-  assert.ok(stats4.range > stats1.range);
+  for (const heroClass of ['archer', 'swordsman', 'bomber'] as const) {
+    const lv1 = getHeroStatsForLevel(heroClass, 1);
+    const hitsForRat = Math.ceil(50 / lv1.damage);
+    assert.ok(
+      hitsForRat >= 3 && hitsForRat <= 6,
+      `Lv1 ${heroClass} (dmg=${lv1.damage}) should take 3-6 hits vs 50 HP common enemy, got ${hitsForRat}`
+    );
+    const lv5 = getHeroStatsForLevel(heroClass, 5);
+    const lv10 = getHeroStatsForLevel(heroClass, 10);
+    const lv15 = getHeroStatsForLevel(heroClass, 15);
+    assert.ok(lv5.damage >= lv1.damage * 2);
+    assert.ok(lv10.damage >= lv5.damage * 2.5);
+    assert.ok(lv15.damage >= lv1.damage * 15);
+    assert.ok(lv5.cooldown < lv1.cooldown);
+    assert.ok(lv5.range > lv1.range);
+  }
 
   const hero: HeroEntity = {
     heroClass: 'bomber',
@@ -193,22 +276,98 @@ test('Hero XP progression scales level, attack power, range, and caps at MAX_HER
   assert.equal(res.newLevel, 2);
   assert.ok(hero.blastRadius > getHeroStatsForLevel('bomber', 1).blastRadius);
 
-  const maxRes = applyHeroXpGain(hero, 1000);
+  const maxRes = applyHeroXpGain(hero, 12000);
   assert.equal(maxRes.isMaxReached, true);
   assert.equal(hero.level, MAX_HERO_LEVEL);
 });
 
-test('getStageConfig scales difficulty from Stage 1 to Stage 10 and flags final wave boss', () => {
+test('generateConvergenceStages schedules irregular 4-8 stage intervals, evolution cost scales, and free placement validates ground', () => {
+  const schedule = generateConvergenceStages(4242);
+  assert.ok(schedule.length >= 18);
+  assert.ok(schedule[0] >= 4 && schedule[0] <= 8);
+  for (let i = 1; i < schedule.length; i++) {
+    const gap = schedule[i] - schedule[i - 1];
+    assert.ok(gap >= 4 && gap <= 8, `Expected Convergence gap 4-8, got ${gap}`);
+  }
+
+  const convCfg = getStageConfig(schedule[0], schedule);
+  assert.equal(convCfg.isConvergenceStage, true);
+  assert.ok(convCfg.routeCount >= 3);
+
+  assert.equal(getHeroEvolutionCost(1), 1);
+  assert.ok(getHeroEvolutionCost(10) > getHeroEvolutionCost(1));
+  assert.equal(getHeroRankTitle(1), 'Aprendiz');
+  assert.equal(getHeroRankTitle(15), 'Mestre');
+  assert.equal(getHeroRankTitle(25), 'Mítico');
+
+  const arena = buildArenaForStage(8, true); // 4-route map
+  // Valid open grass spot
+  assert.equal(isValidFreeHeroPosition(215, 315, arena, []), true);
+  // Blocked: on top of Castle
+  assert.equal(isValidFreeHeroPosition(arena.castleX, arena.castleY, arena, []), false);
+  // Blocked: directly on route 1 road
+  assert.equal(isValidFreeHeroPosition(300, 410, arena, []), false);
+  // Blocked: overlapping another hero
+  assert.equal(isValidFreeHeroPosition(220, 320, arena, [{ x: 215, y: 315 }]), false);
+});
+
+test('getStageConfig scales difficulty from Stage 1 to Stage 150, flags boss wave, and unlocks album entries', () => {
   const s1 = getStageConfig(1);
-  const s10 = getStageConfig(10);
-  assert.ok(s10.hpMultiplier > s1.hpMultiplier);
-  assert.ok(s10.bossHp > s1.bossHp);
-  assert.ok(s10.spawnInterval < s1.spawnInterval);
+  const s3 = getStageConfig(3);
+  const s5 = getStageConfig(5);
+  const s6 = getStageConfig(6);
+  const s150 = getStageConfig(150);
+  assert.ok(s150.hpMultiplier > s1.hpMultiplier);
+  assert.ok(s150.bossHp > s1.bossHp);
+  assert.equal(s150.bossHp, 25000);
+  assert.ok(s150.spawnInterval < s1.spawnInterval);
+  assert.equal(s1.isFiveLevelMilestone, false);
+  assert.equal(s1.unlockedEnemyLabel, 'Rato de Esgoto');
+  assert.equal(s1.unlockedAllyLabel, 'Batedor');
+  assert.equal(s3.unlockedEnemyLabel, 'Slime Verde');
+  assert.equal(s5.isFiveLevelMilestone, true);
+  assert.equal(s5.unlockedEnemyLabel, 'Goblin Batedor');
+  assert.equal(s6.unlockedAllyLabel, 'Sapo Lâmina');
+  assert.equal(s150.unlockedEnemyLabel, 'O Deus Esquecido (Chefe Final)');
 
   const w1 = computeWaveConfig(1, 1);
   const wFinal = computeWaveConfig(s1.totalWaves, 1);
   assert.equal(w1.isBossWave, false);
   assert.equal(wFinal.isBossWave, true);
+  assert.equal(w1.mix.stalker, 0);
+
+  const w3 = computeWaveConfig(1, 3);
+  assert.ok(w3.mix.stalker > 0);
+  assert.equal(w3.mix.pyro, 0);
+
+  const w5 = computeWaveConfig(1, 5);
+  assert.ok(w5.mix.pyro > 0);
+  assert.equal(w5.mix.titan, 0);
+
+  const w8 = computeWaveConfig(1, 8);
+  assert.ok(w8.mix.titan > 0);
+  assert.equal(w8.mix.reaper, 0);
+
+  const w10 = computeWaveConfig(1, 10);
+  assert.ok(w10.mix.reaper > 0);
+});
+
+test('computeEnemyEssenceReward regulates essence per kill and crossedHeroUpgradeMilestone detects multiples of 5', () => {
+  assert.equal(computeEnemyEssenceReward('walker', 1, false), 4);
+  assert.equal(computeEnemyEssenceReward('walker', 10, false), 4);
+  assert.equal(computeEnemyEssenceReward('shielded', 2, false), 6);
+  assert.equal(computeEnemyEssenceReward('brute', 3, false), 9);
+  assert.equal(computeEnemyEssenceReward('stalker', 3, false), 10);
+  assert.equal(computeEnemyEssenceReward('pyro', 5, false), 11);
+  assert.equal(computeEnemyEssenceReward('titan', 8, false), 14);
+  assert.equal(computeEnemyEssenceReward('reaper', 10, false), 16);
+  assert.equal(computeEnemyEssenceReward('walker', 1, true), 6);
+  assert.equal(computeEnemyEssenceReward('boss', 1, false), 26);
+
+  assert.equal(crossedHeroUpgradeMilestone(1, 2), null);
+  assert.equal(crossedHeroUpgradeMilestone(4, 5), 5);
+  assert.equal(crossedHeroUpgradeMilestone(8, 10), 10);
+  assert.equal(crossedHeroUpgradeMilestone(14, 15), 15);
 });
 
 test('unlockNextStage increments unlocked stage and clamps at TOTAL_STAGES', () => {
@@ -297,15 +456,33 @@ test('findEnemiesInSlashArc hits multiple enemies inside crescent arc', () => {
   );
 });
 
-test('applyDamageToEnemy reduces hp, respects shield brace, and triggers KO state', () => {
-  const shielded = makeEnemy({ kind: 'shielded', hp: 40, maxHp: 40, bracingTimer: 0.5 });
-  const hit1 = applyDamageToEnemy(shielded, 20);
-  assert.equal(hit1.actualDamage, 11);
-  assert.equal(shielded.hp, 29);
-  assert.equal(hit1.killed, false);
+test('applyDamageToEnemy differentiates resistance across common, armored, titan, and boss enemies', () => {
+  const walker = makeEnemy({ kind: 'walker', hp: 50, maxHp: 50 });
+  const brute = makeEnemy({ kind: 'brute', hp: 120, maxHp: 120 });
+  const shielded = makeEnemy({ kind: 'shielded', hp: 80, maxHp: 80, bracingTimer: 0.5 });
+  const titan = makeEnemy({ kind: 'titan', hp: 200, maxHp: 200, bracingTimer: 0 });
+  const boss = makeEnemy({ kind: 'boss', hp: 400, maxHp: 400 });
 
-  const hit2 = applyDamageToEnemy(shielded, 100);
-  assert.equal(hit2.killed, true);
+  assert.equal(getEnemyResistanceMultiplier(walker, true), 1);
+  assert.ok(getEnemyResistanceMultiplier(brute, true) < 0.7);
+  assert.ok(getEnemyResistanceMultiplier(titan, true) < 0.5);
+  assert.ok(getEnemyResistanceMultiplier(boss, true) < 0.5);
+
+  const hitBraced = applyDamageToEnemy(shielded, 20);
+  assert.equal(hitBraced.actualDamage, 8);
+  assert.equal(shielded.hp, 72);
+  assert.equal(hitBraced.killed, false);
+
+  const hitBossByHero = applyDamageToEnemy(boss, 20, { byHero: true });
+  assert.equal(hitBossByHero.actualDamage, 8);
+
+  shielded.corrosionTimer = 2;
+  const corrodedHit = applyDamageToEnemy(shielded, 10, { byHero: true });
+  assert.equal(corrodedHit.actualDamage, 12);
+  assert.equal(shielded.hp, 60);
+
+  const hitKill = applyDamageToEnemy(shielded, 100);
+  assert.equal(hitKill.killed, true);
   assert.equal(shielded.isDead, true);
   assert.equal(shielded.hp, 0);
 });

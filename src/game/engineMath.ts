@@ -1,3 +1,4 @@
+import { getAllyUnlockForStage, getEnemyUnlockForStage } from './bestiaryData';
 import {
   ArenaConfig,
   ArenaSlot,
@@ -10,7 +11,9 @@ import {
   HeroEntity,
   MAX_HERO_LEVEL,
   MAX_UNIT_LEVEL,
+  RouteBranch,
   RouteWaypoint,
+  SlotCoord,
   StageConfig,
   StageRouteDefinition,
   TOTAL_STAGES,
@@ -18,11 +21,24 @@ import {
   UnitEntity,
 } from './types';
 
+function makeBranch(
+  id: string,
+  gateIndex: number,
+  label: string,
+  unlockRouteLevel: number,
+  color: string,
+  waypoints: ReadonlyArray<RouteWaypoint>
+): RouteBranch {
+  return { id, gateIndex, label, unlockRouteLevel, color, waypoints };
+}
+
 export const STAGE_ROUTES: ReadonlyArray<StageRouteDefinition> = [
+  // 0: 1 Route — Straight Clearing
   {
     stage: 1,
     title: 'Trilha da Clareira',
-    routeArchetype: 'Trilha Reta',
+    routeArchetype: '1 Rota · Trilha Reta',
+    initialRouteLevel: 1,
     castleX: 1055,
     castleY: 410,
     waypoints: [
@@ -32,7 +48,17 @@ export const STAGE_ROUTES: ReadonlyArray<StageRouteDefinition> = [
       { x: 780, y: 410 },
       { x: 1055, y: 410 },
     ],
+    routes: [
+      makeBranch('r1', 1, 'Portão Oeste', 1, '#FF2E4C', [
+        { x: 96, y: 410 },
+        { x: 380, y: 410 },
+        { x: 580, y: 390 },
+        { x: 780, y: 410 },
+        { x: 1055, y: 410 },
+      ]),
+    ],
     heroStartSlotId: 's1-5',
+    trioStartSlotIds: ['s1-5', 's1-7', 's1-4'],
     slots: [
       { id: 's1-1', x: 215, y: 315, zone: 1, angle: Math.PI * 0.5 },
       { id: 's1-2', x: 215, y: 505, zone: 1, angle: -Math.PI * 0.5 },
@@ -48,10 +74,12 @@ export const STAGE_ROUTES: ReadonlyArray<StageRouteDefinition> = [
       { id: 's1-12', x: 635, y: 585, zone: 3, angle: -Math.PI * 0.5 },
     ],
   },
+  // 1: 1 Route — S-Curve
   {
     stage: 2,
     title: 'Curva das Brasas',
-    routeArchetype: 'Curva em S',
+    routeArchetype: '1 Rota · Curva em S',
+    initialRouteLevel: 1,
     castleX: 1055,
     castleY: 360,
     waypoints: [
@@ -67,7 +95,23 @@ export const STAGE_ROUTES: ReadonlyArray<StageRouteDefinition> = [
       { x: 1010, y: 295 },
       { x: 1055, y: 360 },
     ],
+    routes: [
+      makeBranch('r1', 1, 'Portão Oeste', 1, '#FF2E4C', [
+        { x: 96, y: 255 },
+        { x: 365, y: 255 },
+        { x: 420, y: 295 },
+        { x: 420, y: 515 },
+        { x: 475, y: 555 },
+        { x: 725, y: 555 },
+        { x: 780, y: 515 },
+        { x: 780, y: 325 },
+        { x: 835, y: 285 },
+        { x: 1010, y: 295 },
+        { x: 1055, y: 360 },
+      ]),
+    ],
     heroStartSlotId: 's2-5',
+    trioStartSlotIds: ['s2-5', 's2-7', 's2-3'],
     slots: [
       { id: 's2-1', x: 215, y: 170, zone: 1, angle: Math.PI * 0.5 },
       { id: 's2-2', x: 215, y: 345, zone: 1, angle: -Math.PI * 0.5 },
@@ -83,10 +127,12 @@ export const STAGE_ROUTES: ReadonlyArray<StageRouteDefinition> = [
       { id: 's2-12', x: 515, y: 210, zone: 2, angle: Math.PI },
     ],
   },
+  // 2: 1 Route — Labyrinth
   {
     stage: 3,
     title: 'Labirinto Sinuoso',
-    routeArchetype: 'Labirinto Sinuoso',
+    routeArchetype: '1 Rota · Labirinto',
+    initialRouteLevel: 1,
     castleX: 1055,
     castleY: 435,
     waypoints: [
@@ -107,7 +153,28 @@ export const STAGE_ROUTES: ReadonlyArray<StageRouteDefinition> = [
       { x: 1055, y: 495 },
       { x: 1055, y: 435 },
     ],
+    routes: [
+      makeBranch('r1', 1, 'Portão Oeste', 1, '#FF2E4C', [
+        { x: 96, y: 245 },
+        { x: 255, y: 245 },
+        { x: 295, y: 290 },
+        { x: 295, y: 515 },
+        { x: 340, y: 560 },
+        { x: 505, y: 560 },
+        { x: 550, y: 515 },
+        { x: 550, y: 270 },
+        { x: 595, y: 225 },
+        { x: 765, y: 225 },
+        { x: 810, y: 270 },
+        { x: 810, y: 520 },
+        { x: 855, y: 565 },
+        { x: 1005, y: 555 },
+        { x: 1055, y: 495 },
+        { x: 1055, y: 435 },
+      ]),
+    ],
     heroStartSlotId: 's3-6',
+    trioStartSlotIds: ['s3-6', 's3-9', 's3-4'],
     slots: [
       { id: 's3-1', x: 195, y: 165, zone: 1, angle: Math.PI * 0.5 },
       { id: 's3-2', x: 195, y: 350, zone: 1, angle: 0 },
@@ -124,10 +191,12 @@ export const STAGE_ROUTES: ReadonlyArray<StageRouteDefinition> = [
       { id: 's3-13', x: 915, y: 455, zone: 4, angle: Math.PI },
     ],
   },
+  // 3: 1 Route — Zig-Zag
   {
     stage: 4,
     title: 'Zigue-Zague Carmesim',
-    routeArchetype: 'Zigue-Zague',
+    routeArchetype: '1 Rota · Zigue-Zague',
+    initialRouteLevel: 1,
     castleX: 1055,
     castleY: 405,
     waypoints: [
@@ -139,7 +208,19 @@ export const STAGE_ROUTES: ReadonlyArray<StageRouteDefinition> = [
       { x: 910, y: 265 },
       { x: 1055, y: 405 },
     ],
+    routes: [
+      makeBranch('r1', 1, 'Portão Oeste', 1, '#FF2E4C', [
+        { x: 96, y: 245 },
+        { x: 245, y: 245 },
+        { x: 410, y: 555 },
+        { x: 580, y: 245 },
+        { x: 750, y: 555 },
+        { x: 910, y: 265 },
+        { x: 1055, y: 405 },
+      ]),
+    ],
     heroStartSlotId: 's4-6',
+    trioStartSlotIds: ['s4-6', 's4-4', 's4-8'],
     slots: [
       { id: 's4-1', x: 185, y: 345, zone: 1, angle: 0 },
       { id: 's4-2', x: 335, y: 215, zone: 1, angle: Math.PI * 0.5 },
@@ -155,217 +236,717 @@ export const STAGE_ROUTES: ReadonlyArray<StageRouteDefinition> = [
       { id: 's4-12', x: 935, y: 185, zone: 4, angle: Math.PI * 0.5 },
     ],
   },
+  // 4: 2 Routes — Pinça do Norte (West + North)
   {
     stage: 5,
-    title: 'Passo da Ferradura',
-    routeArchetype: 'Arco em Ferradura',
+    title: 'Pinça do Norte',
+    routeArchetype: '2 Rotas · Pinça Norte',
+    initialRouteLevel: 1,
     castleX: 1055,
-    castleY: 565,
+    castleY: 410,
     waypoints: [
-      { x: 96, y: 565 },
-      { x: 245, y: 565 },
-      { x: 245, y: 235 },
-      { x: 905, y: 235 },
-      { x: 905, y: 425 },
-      { x: 540, y: 425 },
-      { x: 540, y: 565 },
-      { x: 1055, y: 565 },
+      { x: 96, y: 465 },
+      { x: 430, y: 465 },
+      { x: 660, y: 410 },
+      { x: 1055, y: 410 },
+    ],
+    routes: [
+      makeBranch('r1', 1, 'Portão Oeste', 1, '#FF2E4C', [
+        { x: 96, y: 465 },
+        { x: 430, y: 465 },
+        { x: 660, y: 410 },
+        { x: 1055, y: 410 },
+      ]),
+      makeBranch('r2', 2, 'Fenda Norte', 2, '#00D4FF', [
+        { x: 265, y: 118 },
+        { x: 265, y: 265 },
+        { x: 560, y: 265 },
+        { x: 660, y: 410 },
+        { x: 1055, y: 410 },
+      ]),
     ],
     heroStartSlotId: 's5-5',
+    trioStartSlotIds: ['s5-5', 's5-8', 's5-3'],
     slots: [
-      { id: 's5-1', x: 155, y: 445, zone: 1, angle: 0 },
-      { id: 's5-2', x: 155, y: 325, zone: 1, angle: 0 },
-      { id: 's5-3', x: 340, y: 330, zone: 2, angle: -Math.PI * 0.5 },
-      { id: 's5-4', x: 340, y: 485, zone: 2, angle: Math.PI },
-      { id: 's5-5', x: 445, y: 330, zone: 2, angle: 0 },
-      { id: 's5-6', x: 635, y: 330, zone: 3, angle: 0 },
-      { id: 's5-7', x: 795, y: 330, zone: 3, angle: 0 },
-      { id: 's5-8', x: 435, y: 585, zone: 2, angle: 0 },
-      { id: 's5-9', x: 685, y: 495, zone: 3, angle: Math.PI * 0.5 },
-      { id: 's5-10', x: 830, y: 495, zone: 4, angle: Math.PI * 0.5 },
-      { id: 's5-11', x: 995, y: 340, zone: 4, angle: Math.PI },
-      { id: 's5-12', x: 540, y: 160, zone: 2, angle: Math.PI * 0.5 },
+      { id: 's5-1', x: 175, y: 355, zone: 1, angle: Math.PI * 0.5 },
+      { id: 's5-2', x: 175, y: 560, zone: 1, angle: -Math.PI * 0.5 },
+      { id: 's5-3', x: 355, y: 365, zone: 2, angle: 0 },
+      { id: 's5-4', x: 355, y: 560, zone: 2, angle: -Math.PI * 0.5 },
+      { id: 's5-5', x: 505, y: 365, zone: 2, angle: 0 },
+      { id: 's5-6', x: 385, y: 175, zone: 2, angle: Math.PI * 0.5 },
+      { id: 's5-7', x: 535, y: 175, zone: 3, angle: Math.PI * 0.5 },
+      { id: 's5-8', x: 755, y: 315, zone: 3, angle: Math.PI * 0.5 },
+      { id: 's5-9', x: 755, y: 510, zone: 3, angle: -Math.PI * 0.5 },
+      { id: 's5-10', x: 575, y: 565, zone: 3, angle: -Math.PI * 0.5 },
+      { id: 's5-11', x: 905, y: 315, zone: 4, angle: Math.PI * 0.5 },
+      { id: 's5-12', x: 905, y: 510, zone: 4, angle: -Math.PI * 0.5 },
     ],
   },
+  // 5: 2 Routes — Twin Canals (Top-Left + Bottom-Left)
   {
     stage: 6,
-    title: 'Ondas Gêmeas',
-    routeArchetype: 'Onda Dupla',
+    title: 'Canais Gêmeos',
+    routeArchetype: '2 Rotas · Canais Gêmeos',
+    initialRouteLevel: 1,
     castleX: 1055,
-    castleY: 465,
+    castleY: 410,
     waypoints: [
-      { x: 96, y: 485 },
-      { x: 225, y: 485 },
-      { x: 325, y: 245 },
-      { x: 485, y: 245 },
-      { x: 580, y: 500 },
-      { x: 680, y: 245 },
-      { x: 845, y: 245 },
-      { x: 935, y: 465 },
-      { x: 1055, y: 465 },
+      { x: 96, y: 230 },
+      { x: 430, y: 230 },
+      { x: 640, y: 310 },
+      { x: 810, y: 410 },
+      { x: 1055, y: 410 },
+    ],
+    routes: [
+      makeBranch('r1', 1, 'Portão Superior', 1, '#FF2E4C', [
+        { x: 96, y: 230 },
+        { x: 430, y: 230 },
+        { x: 640, y: 310 },
+        { x: 810, y: 410 },
+        { x: 1055, y: 410 },
+      ]),
+      makeBranch('r2', 2, 'Portão Inferior', 2, '#FACC15', [
+        { x: 96, y: 590 },
+        { x: 430, y: 590 },
+        { x: 640, y: 510 },
+        { x: 810, y: 410 },
+        { x: 1055, y: 410 },
+      ]),
     ],
     heroStartSlotId: 's6-6',
+    trioStartSlotIds: ['s6-6', 's6-3', 's6-4'],
     slots: [
-      { id: 's6-1', x: 175, y: 385, zone: 1, angle: 0 },
-      { id: 's6-2', x: 240, y: 575, zone: 1, angle: -Math.PI * 0.5 },
-      { id: 's6-3', x: 395, y: 365, zone: 2, angle: -Math.PI * 0.5 },
-      { id: 's6-4', x: 410, y: 485, zone: 2, angle: 0 },
-      { id: 's6-5', x: 405, y: 165, zone: 2, angle: Math.PI * 0.5 },
-      { id: 's6-6', x: 580, y: 290, zone: 3, angle: Math.PI * 0.5 },
-      { id: 's6-7', x: 580, y: 595, zone: 3, angle: -Math.PI * 0.5 },
-      { id: 's6-8', x: 760, y: 365, zone: 3, angle: -Math.PI * 0.5 },
-      { id: 's6-9', x: 750, y: 495, zone: 3, angle: 0 },
-      { id: 's6-10', x: 765, y: 165, zone: 3, angle: Math.PI * 0.5 },
-      { id: 's6-11', x: 940, y: 315, zone: 4, angle: Math.PI * 0.7 },
-      { id: 's6-12', x: 935, y: 565, zone: 4, angle: -Math.PI * 0.5 },
+      { id: 's6-1', x: 190, y: 335, zone: 1, angle: 0 },
+      { id: 's6-2', x: 190, y: 485, zone: 1, angle: 0 },
+      { id: 's6-3', x: 350, y: 335, zone: 2, angle: -Math.PI * 0.5 },
+      { id: 's6-4', x: 350, y: 485, zone: 2, angle: Math.PI * 0.5 },
+      { id: 's6-5', x: 510, y: 410, zone: 2, angle: 0 },
+      { id: 's6-6', x: 655, y: 410, zone: 3, angle: 0 },
+      { id: 's6-7', x: 270, y: 150, zone: 1, angle: Math.PI * 0.5 },
+      { id: 's6-8', x: 560, y: 195, zone: 3, angle: Math.PI * 0.5 },
+      { id: 's6-9', x: 270, y: 660, zone: 1, angle: -Math.PI * 0.5 },
+      { id: 's6-10', x: 560, y: 625, zone: 3, angle: -Math.PI * 0.5 },
+      { id: 's6-11', x: 900, y: 310, zone: 4, angle: Math.PI * 0.5 },
+      { id: 's6-12', x: 900, y: 510, zone: 4, angle: -Math.PI * 0.5 },
     ],
   },
+  // 6: 2 Routes — Crossed Canyon
   {
     stage: 7,
-    title: 'Serpente Dourada',
-    routeArchetype: 'Serpente',
+    title: 'Desfiladeiro Cruzado',
+    routeArchetype: '2 Rotas · Flanco Cruzado',
+    initialRouteLevel: 1,
     castleX: 1055,
-    castleY: 515,
+    castleY: 425,
     waypoints: [
-      { x: 96, y: 540 },
-      { x: 220, y: 540 },
-      { x: 220, y: 245 },
-      { x: 425, y: 245 },
-      { x: 425, y: 540 },
-      { x: 630, y: 540 },
-      { x: 630, y: 245 },
-      { x: 835, y: 245 },
-      { x: 835, y: 515 },
-      { x: 1055, y: 515 },
+      { x: 96, y: 575 },
+      { x: 380, y: 575 },
+      { x: 550, y: 425 },
+      { x: 1055, y: 425 },
+    ],
+    routes: [
+      makeBranch('r1', 1, 'Desfiladeiro Sul', 1, '#FF2E4C', [
+        { x: 96, y: 575 },
+        { x: 380, y: 575 },
+        { x: 550, y: 425 },
+        { x: 1055, y: 425 },
+      ]),
+      makeBranch('r2', 2, 'Rampa Norte', 2, '#00D4FF', [
+        { x: 350, y: 125 },
+        { x: 350, y: 255 },
+        { x: 750, y: 255 },
+        { x: 870, y: 425 },
+        { x: 1055, y: 425 },
+      ]),
     ],
     heroStartSlotId: 's7-6',
+    trioStartSlotIds: ['s7-6', 's7-8', 's7-3'],
     slots: [
-      { id: 's7-1', x: 135, y: 420, zone: 1, angle: 0 },
-      { id: 's7-2', x: 135, y: 300, zone: 1, angle: 0 },
-      { id: 's7-3', x: 322, y: 335, zone: 2, angle: 0 },
-      { id: 's7-4', x: 322, y: 455, zone: 2, angle: 0 },
-      { id: 's7-5', x: 322, y: 575, zone: 2, angle: -Math.PI * 0.5 },
-      { id: 's7-6', x: 528, y: 335, zone: 3, angle: 0 },
-      { id: 's7-7', x: 528, y: 455, zone: 3, angle: 0 },
-      { id: 's7-8', x: 528, y: 215, zone: 3, angle: Math.PI * 0.5 },
-      { id: 's7-9', x: 732, y: 335, zone: 3, angle: 0 },
-      { id: 's7-10', x: 732, y: 455, zone: 3, angle: 0 },
-      { id: 's7-11', x: 732, y: 575, zone: 3, angle: -Math.PI * 0.5 },
-      { id: 's7-12', x: 930, y: 340, zone: 4, angle: Math.PI },
-      { id: 's7-13', x: 930, y: 430, zone: 4, angle: Math.PI * 0.5 },
+      { id: 's7-1', x: 175, y: 470, zone: 1, angle: Math.PI * 0.5 },
+      { id: 's7-2', x: 175, y: 295, zone: 1, angle: 0 },
+      { id: 's7-3', x: 330, y: 420, zone: 2, angle: 0 },
+      { id: 's7-4', x: 495, y: 340, zone: 2, angle: 0 },
+      { id: 's7-5', x: 515, y: 570, zone: 2, angle: -Math.PI * 0.5 },
+      { id: 's7-6', x: 675, y: 345, zone: 3, angle: 0 },
+      { id: 's7-7', x: 675, y: 525, zone: 3, angle: -Math.PI * 0.5 },
+      { id: 's7-8', x: 485, y: 170, zone: 2, angle: Math.PI * 0.5 },
+      { id: 's7-9', x: 670, y: 170, zone: 3, angle: Math.PI * 0.5 },
+      { id: 's7-10', x: 855, y: 225, zone: 3, angle: Math.PI * 0.5 },
+      { id: 's7-11', x: 840, y: 530, zone: 4, angle: -Math.PI * 0.5 },
+      { id: 's7-12', x: 960, y: 325, zone: 4, angle: Math.PI * 0.5 },
     ],
   },
+  // 7: 2 Routes — Horseshoe & North Flank
   {
     stage: 8,
-    title: 'Desfiladeiro Sombrio',
-    routeArchetype: 'Desfiladeiro',
+    title: 'Ferradura & Flanco',
+    routeArchetype: '2 Rotas · Ferradura',
+    initialRouteLevel: 1,
     castleX: 1055,
-    castleY: 405,
+    castleY: 545,
     waypoints: [
-      { x: 96, y: 225 },
-      { x: 660, y: 225 },
-      { x: 705, y: 270 },
-      { x: 505, y: 425 },
-      { x: 265, y: 565 },
-      { x: 795, y: 565 },
-      { x: 865, y: 405 },
-      { x: 1055, y: 405 },
+      { x: 96, y: 545 },
+      { x: 245, y: 545 },
+      { x: 245, y: 245 },
+      { x: 660, y: 245 },
+      { x: 660, y: 545 },
+      { x: 1055, y: 545 },
+    ],
+    routes: [
+      makeBranch('r1', 1, 'Arco Oeste', 1, '#FF2E4C', [
+        { x: 96, y: 545 },
+        { x: 245, y: 545 },
+        { x: 245, y: 245 },
+        { x: 660, y: 245 },
+        { x: 660, y: 545 },
+        { x: 1055, y: 545 },
+      ]),
+      makeBranch('r2', 2, 'Brecha Nordeste', 2, '#FACC15', [
+        { x: 845, y: 120 },
+        { x: 845, y: 370 },
+        { x: 845, y: 545 },
+        { x: 1055, y: 545 },
+      ]),
     ],
     heroStartSlotId: 's8-5',
+    trioStartSlotIds: ['s8-5', 's8-9', 's8-3'],
     slots: [
-      { id: 's8-1', x: 215, y: 315, zone: 1, angle: -Math.PI * 0.5 },
-      { id: 's8-2', x: 375, y: 315, zone: 2, angle: -Math.PI * 0.5 },
-      { id: 's8-3', x: 530, y: 305, zone: 2, angle: 0 },
-      { id: 's8-4', x: 230, y: 455, zone: 2, angle: 0 },
-      { id: 's8-5', x: 545, y: 490, zone: 3, angle: Math.PI * 0.5 },
-      { id: 's8-6', x: 705, y: 475, zone: 3, angle: 0 },
-      { id: 's8-7', x: 785, y: 325, zone: 3, angle: Math.PI },
-      { id: 's8-8', x: 405, y: 640, zone: 2, angle: -Math.PI * 0.5 },
-      { id: 's8-9', x: 675, y: 640, zone: 3, angle: -Math.PI * 0.5 },
-      { id: 's8-10', x: 935, y: 315, zone: 4, angle: Math.PI * 0.5 },
-      { id: 's8-11', x: 935, y: 500, zone: 4, angle: -Math.PI * 0.5 },
-      { id: 's8-12', x: 405, y: 150, zone: 2, angle: Math.PI * 0.5 },
+      { id: 's8-1', x: 155, y: 420, zone: 1, angle: 0 },
+      { id: 's8-2', x: 155, y: 295, zone: 1, angle: 0 },
+      { id: 's8-3', x: 350, y: 355, zone: 2, angle: 0 },
+      { id: 's8-4', x: 350, y: 485, zone: 2, angle: 0 },
+      { id: 's8-5', x: 525, y: 355, zone: 2, angle: 0 },
+      { id: 's8-6', x: 525, y: 485, zone: 2, angle: 0 },
+      { id: 's8-7', x: 455, y: 165, zone: 2, angle: Math.PI * 0.5 },
+      { id: 's8-8', x: 750, y: 355, zone: 3, angle: 0 },
+      { id: 's8-9', x: 750, y: 465, zone: 3, angle: Math.PI * 0.5 },
+      { id: 's8-10', x: 940, y: 270, zone: 4, angle: Math.PI },
+      { id: 's8-11', x: 940, y: 435, zone: 4, angle: Math.PI },
+      { id: 's8-12', x: 845, y: 635, zone: 4, angle: -Math.PI * 0.5 },
     ],
   },
+  // 8: 3 Routes — Trident Siege (West, North-West, South-West)
   {
     stage: 9,
-    title: 'Escadaria Real',
-    routeArchetype: 'Escadaria',
+    title: 'Cerco do Tridente',
+    routeArchetype: '3 Rotas · Tridente',
+    initialRouteLevel: 1,
+    castleX: 1055,
+    castleY: 410,
+    waypoints: [
+      { x: 96, y: 410 },
+      { x: 780, y: 410 },
+      { x: 1055, y: 410 },
+    ],
+    routes: [
+      makeBranch('r1', 1, 'Portão Central', 1, '#FF2E4C', [
+        { x: 96, y: 410 },
+        { x: 780, y: 410 },
+        { x: 1055, y: 410 },
+      ]),
+      makeBranch('r2', 2, 'Portão Norte', 2, '#00D4FF', [
+        { x: 355, y: 120 },
+        { x: 355, y: 230 },
+        { x: 640, y: 230 },
+        { x: 780, y: 410 },
+        { x: 1055, y: 410 },
+      ]),
+      makeBranch('r3', 3, 'Portão Sul', 3, '#FACC15', [
+        { x: 355, y: 700 },
+        { x: 355, y: 590 },
+        { x: 640, y: 590 },
+        { x: 780, y: 410 },
+        { x: 1055, y: 410 },
+      ]),
+    ],
+    heroStartSlotId: 's9-5',
+    trioStartSlotIds: ['s9-5', 's9-6', 's9-9'],
+    slots: [
+      { id: 's9-1', x: 205, y: 315, zone: 1, angle: Math.PI * 0.5 },
+      { id: 's9-2', x: 205, y: 505, zone: 1, angle: -Math.PI * 0.5 },
+      { id: 's9-3', x: 465, y: 320, zone: 2, angle: 0 },
+      { id: 's9-4', x: 465, y: 500, zone: 2, angle: 0 },
+      { id: 's9-5', x: 610, y: 320, zone: 2, angle: 0 },
+      { id: 's9-6', x: 610, y: 500, zone: 2, angle: 0 },
+      { id: 's9-7', x: 515, y: 155, zone: 2, angle: Math.PI * 0.5 },
+      { id: 's9-8', x: 515, y: 660, zone: 2, angle: -Math.PI * 0.5 },
+      { id: 's9-9', x: 870, y: 315, zone: 4, angle: Math.PI * 0.5 },
+      { id: 's9-10', x: 870, y: 505, zone: 4, angle: -Math.PI * 0.5 },
+      { id: 's9-11', x: 775, y: 205, zone: 3, angle: Math.PI * 0.5 },
+      { id: 's9-12', x: 775, y: 615, zone: 3, angle: -Math.PI * 0.5 },
+    ],
+  },
+  // 9: 3 Routes — Three Western Breaches
+  {
+    stage: 10,
+    title: 'Três Fendas',
+    routeArchetype: '3 Rotas · Três Fendas',
+    initialRouteLevel: 1,
+    castleX: 1055,
+    castleY: 410,
+    waypoints: [
+      { x: 96, y: 410 },
+      { x: 685, y: 410 },
+      { x: 1055, y: 410 },
+    ],
+    routes: [
+      makeBranch('r1', 1, 'Fenda Central', 1, '#FF2E4C', [
+        { x: 96, y: 410 },
+        { x: 685, y: 410 },
+        { x: 1055, y: 410 },
+      ]),
+      makeBranch('r2', 2, 'Fenda Alta', 2, '#00D4FF', [
+        { x: 96, y: 195 },
+        { x: 520, y: 195 },
+        { x: 685, y: 410 },
+        { x: 1055, y: 410 },
+      ]),
+      makeBranch('r3', 3, 'Fenda Baixa', 3, '#FACC15', [
+        { x: 96, y: 625 },
+        { x: 520, y: 625 },
+        { x: 685, y: 410 },
+        { x: 1055, y: 410 },
+      ]),
+    ],
+    heroStartSlotId: 's10-5',
+    trioStartSlotIds: ['s10-5', 's10-6', 's10-9'],
+    slots: [
+      { id: 's10-1', x: 205, y: 300, zone: 1, angle: 0 },
+      { id: 's10-2', x: 205, y: 520, zone: 1, angle: 0 },
+      { id: 's10-3', x: 380, y: 300, zone: 2, angle: 0 },
+      { id: 's10-4', x: 380, y: 520, zone: 2, angle: 0 },
+      { id: 's10-5', x: 525, y: 315, zone: 2, angle: 0 },
+      { id: 's10-6', x: 525, y: 505, zone: 2, angle: 0 },
+      { id: 's10-7', x: 790, y: 315, zone: 3, angle: Math.PI * 0.5 },
+      { id: 's10-8', x: 790, y: 505, zone: 3, angle: -Math.PI * 0.5 },
+      { id: 's10-9', x: 925, y: 315, zone: 4, angle: Math.PI * 0.5 },
+      { id: 's10-10', x: 925, y: 505, zone: 4, angle: -Math.PI * 0.5 },
+      { id: 's10-11', x: 675, y: 200, zone: 3, angle: Math.PI * 0.5 },
+      { id: 's10-12', x: 675, y: 620, zone: 3, angle: -Math.PI * 0.5 },
+    ],
+  },
+  // 10: 3 Routes — Triple Staircase Assault
+  {
+    stage: 11,
+    title: 'Escadaria Tripla',
+    routeArchetype: '3 Rotas · Assalto Misto',
+    initialRouteLevel: 1,
     castleX: 1055,
     castleY: 395,
     waypoints: [
       { x: 96, y: 575 },
-      { x: 275, y: 575 },
-      { x: 275, y: 470 },
-      { x: 475, y: 470 },
-      { x: 475, y: 365 },
-      { x: 680, y: 365 },
-      { x: 680, y: 255 },
-      { x: 905, y: 255 },
-      { x: 905, y: 395 },
+      { x: 295, y: 575 },
+      { x: 295, y: 405 },
+      { x: 775, y: 405 },
       { x: 1055, y: 395 },
     ],
-    heroStartSlotId: 's9-6',
+    routes: [
+      makeBranch('r1', 1, 'Escada Oeste', 1, '#FF2E4C', [
+        { x: 96, y: 575 },
+        { x: 295, y: 575 },
+        { x: 295, y: 405 },
+        { x: 775, y: 405 },
+        { x: 1055, y: 395 },
+      ]),
+      makeBranch('r2', 2, 'Queda do Norte', 2, '#00D4FF', [
+        { x: 485, y: 118 },
+        { x: 485, y: 255 },
+        { x: 775, y: 255 },
+        { x: 775, y: 405 },
+        { x: 1055, y: 395 },
+      ]),
+      makeBranch('r3', 3, 'Tunel do Sul', 3, '#FACC15', [
+        { x: 625, y: 700 },
+        { x: 625, y: 565 },
+        { x: 895, y: 565 },
+        { x: 1055, y: 395 },
+      ]),
+    ],
+    heroStartSlotId: 's11-5',
+    trioStartSlotIds: ['s11-5', 's11-7', 's11-10'],
     slots: [
-      { id: 's9-1', x: 185, y: 485, zone: 1, angle: Math.PI * 0.5 },
-      { id: 's9-2', x: 365, y: 555, zone: 2, angle: -Math.PI * 0.5 },
-      { id: 's9-3', x: 375, y: 380, zone: 2, angle: Math.PI * 0.5 },
-      { id: 's9-4', x: 565, y: 455, zone: 2, angle: -Math.PI * 0.5 },
-      { id: 's9-5', x: 580, y: 275, zone: 3, angle: Math.PI * 0.5 },
-      { id: 's9-6', x: 775, y: 345, zone: 3, angle: -Math.PI * 0.5 },
-      { id: 's9-7', x: 775, y: 465, zone: 3, angle: -Math.PI * 0.5 },
-      { id: 's9-8', x: 790, y: 175, zone: 3, angle: Math.PI * 0.5 },
-      { id: 's9-9', x: 990, y: 300, zone: 4, angle: Math.PI },
-      { id: 's9-10', x: 935, y: 495, zone: 4, angle: -Math.PI * 0.5 },
-      { id: 's9-11', x: 265, y: 370, zone: 1, angle: Math.PI * 0.5 },
-      { id: 's9-12', x: 475, y: 265, zone: 2, angle: Math.PI * 0.5 },
+      { id: 's11-1', x: 195, y: 475, zone: 1, angle: Math.PI * 0.5 },
+      { id: 's11-2', x: 195, y: 315, zone: 1, angle: 0 },
+      { id: 's11-3', x: 390, y: 315, zone: 2, angle: 0 },
+      { id: 's11-4', x: 390, y: 500, zone: 2, angle: 0 },
+      { id: 's11-5', x: 565, y: 330, zone: 2, angle: 0 },
+      { id: 's11-6', x: 515, y: 500, zone: 2, angle: -Math.PI * 0.5 },
+      { id: 's11-7', x: 695, y: 330, zone: 3, angle: 0 },
+      { id: 's11-8', x: 715, y: 490, zone: 3, angle: 0 },
+      { id: 's11-9', x: 635, y: 175, zone: 3, angle: Math.PI * 0.5 },
+      { id: 's11-10', x: 880, y: 310, zone: 4, angle: Math.PI * 0.5 },
+      { id: 's11-11', x: 870, y: 485, zone: 4, angle: -Math.PI * 0.5 },
+      { id: 's11-12', x: 455, y: 635, zone: 2, angle: 0 },
     ],
   },
+  // 11: 3 Routes — Spiral of Ruin
   {
-    stage: 10,
-    title: 'Cerco do Imperador',
-    routeArchetype: 'Cerco Final',
+    stage: 12,
+    title: 'Espiral da Ruína',
+    routeArchetype: '3 Rotas · Espiral',
+    initialRouteLevel: 1,
     castleX: 1055,
-    castleY: 435,
+    castleY: 430,
     waypoints: [
-      { x: 96, y: 395 },
-      { x: 220, y: 395 },
-      { x: 220, y: 225 },
-      { x: 450, y: 225 },
-      { x: 450, y: 565 },
-      { x: 665, y: 565 },
-      { x: 665, y: 230 },
-      { x: 870, y: 230 },
-      { x: 870, y: 545 },
-      { x: 1005, y: 530 },
-      { x: 1055, y: 435 },
+      { x: 96, y: 230 },
+      { x: 380, y: 230 },
+      { x: 380, y: 430 },
+      { x: 1055, y: 430 },
     ],
-    heroStartSlotId: 's10-6',
+    routes: [
+      makeBranch('r1', 1, 'Arco Superior', 1, '#FF2E4C', [
+        { x: 96, y: 230 },
+        { x: 380, y: 230 },
+        { x: 380, y: 430 },
+        { x: 1055, y: 430 },
+      ]),
+      makeBranch('r2', 2, 'Vala Inferior', 2, '#00D4FF', [
+        { x: 96, y: 615 },
+        { x: 560, y: 615 },
+        { x: 695, y: 430 },
+        { x: 1055, y: 430 },
+      ]),
+      makeBranch('r3', 3, 'Brecha do Pico', 3, '#FACC15', [
+        { x: 675, y: 118 },
+        { x: 675, y: 255 },
+        { x: 855, y: 255 },
+        { x: 925, y: 430 },
+        { x: 1055, y: 430 },
+      ]),
+    ],
+    heroStartSlotId: 's12-5',
+    trioStartSlotIds: ['s12-5', 's12-7', 's12-9'],
     slots: [
-      { id: 's10-1', x: 135, y: 295, zone: 1, angle: 0 },
-      { id: 's10-2', x: 145, y: 495, zone: 1, angle: -Math.PI * 0.5 },
-      { id: 's10-3', x: 335, y: 315, zone: 2, angle: 0 },
-      { id: 's10-4', x: 335, y: 435, zone: 2, angle: 0 },
-      { id: 's10-5', x: 335, y: 565, zone: 2, angle: 0 },
-      { id: 's10-6', x: 558, y: 325, zone: 3, angle: 0 },
-      { id: 's10-7', x: 558, y: 455, zone: 3, angle: 0 },
-      { id: 's10-8', x: 558, y: 215, zone: 3, angle: Math.PI * 0.5 },
-      { id: 's10-9', x: 768, y: 325, zone: 3, angle: 0 },
-      { id: 's10-10', x: 768, y: 455, zone: 3, angle: 0 },
-      { id: 's10-11', x: 768, y: 575, zone: 3, angle: -Math.PI * 0.5 },
-      { id: 's10-12', x: 960, y: 320, zone: 4, angle: Math.PI },
-      { id: 's10-13', x: 955, y: 430, zone: 4, angle: Math.PI },
+      { id: 's12-1', x: 205, y: 330, zone: 1, angle: 0 },
+      { id: 's12-2', x: 205, y: 505, zone: 1, angle: 0 },
+      { id: 's12-3', x: 295, y: 425, zone: 2, angle: 0 },
+      { id: 's12-4', x: 475, y: 325, zone: 2, angle: 0 },
+      { id: 's12-5', x: 475, y: 525, zone: 2, angle: 0 },
+      { id: 's12-6', x: 590, y: 335, zone: 3, angle: 0 },
+      { id: 's12-7', x: 785, y: 345, zone: 3, angle: 0 },
+      { id: 's12-8', x: 785, y: 525, zone: 3, angle: -Math.PI * 0.5 },
+      { id: 's12-9', x: 530, y: 170, zone: 2, angle: Math.PI * 0.5 },
+      { id: 's12-10', x: 945, y: 295, zone: 4, angle: Math.PI },
+      { id: 's12-11', x: 945, y: 530, zone: 4, angle: -Math.PI * 0.5 },
+      { id: 's12-12', x: 265, y: 150, zone: 1, angle: Math.PI * 0.5 },
+    ],
+  },
+  // 12: 4 Routes — Quatro Portões do Cerco (Central-East Bastion at 825, 410!)
+  {
+    stage: 13,
+    title: 'Quatro Portões do Cerco',
+    routeArchetype: '4 Rotas · Cerco Cardinal',
+    initialRouteLevel: 1,
+    castleX: 825,
+    castleY: 410,
+    waypoints: [
+      { x: 96, y: 410 },
+      { x: 450, y: 410 },
+      { x: 825, y: 410 },
+    ],
+    routes: [
+      makeBranch('r1', 1, 'Portão Oeste', 1, '#FF2E4C', [
+        { x: 96, y: 410 },
+        { x: 450, y: 410 },
+        { x: 825, y: 410 },
+      ]),
+      makeBranch('r2', 2, 'Portão Norte', 2, '#00D4FF', [
+        { x: 430, y: 118 },
+        { x: 430, y: 245 },
+        { x: 645, y: 245 },
+        { x: 825, y: 410 },
+      ]),
+      makeBranch('r3', 3, 'Portão Sul', 3, '#FACC15', [
+        { x: 430, y: 700 },
+        { x: 430, y: 575 },
+        { x: 645, y: 575 },
+        { x: 825, y: 410 },
+      ]),
+      makeBranch('r4', 4, 'Portão Leste', 4, '#A855F7', [
+        { x: 1105, y: 495 },
+        { x: 1005, y: 495 },
+        { x: 1005, y: 410 },
+        { x: 825, y: 410 },
+      ]),
+    ],
+    heroStartSlotId: 's13-6',
+    trioStartSlotIds: ['s13-6', 's13-7', 's13-9'],
+    slots: [
+      { id: 's13-1', x: 215, y: 315, zone: 1, angle: Math.PI * 0.5 },
+      { id: 's13-2', x: 215, y: 505, zone: 1, angle: -Math.PI * 0.5 },
+      { id: 's13-3', x: 335, y: 225, zone: 1, angle: 0 },
+      { id: 's13-4', x: 335, y: 595, zone: 1, angle: 0 },
+      { id: 's13-5', x: 525, y: 325, zone: 2, angle: 0 },
+      { id: 's13-6', x: 525, y: 495, zone: 2, angle: 0 },
+      { id: 's13-7', x: 675, y: 350, zone: 3, angle: 0 },
+      { id: 's13-8', x: 675, y: 470, zone: 3, angle: 0 },
+      { id: 's13-9', x: 915, y: 300, zone: 4, angle: Math.PI },
+      { id: 's13-10', x: 915, y: 520, zone: 4, angle: Math.PI },
+      { id: 's13-11', x: 765, y: 205, zone: 3, angle: Math.PI * 0.5 },
+      { id: 's13-12', x: 765, y: 615, zone: 3, angle: -Math.PI * 0.5 },
+    ],
+  },
+  // 13: 4 Routes — Tempestade dos Ventos
+  {
+    stage: 14,
+    title: 'Tempestade dos Ventos',
+    routeArchetype: '4 Rotas · Quatro Ventos',
+    initialRouteLevel: 1,
+    castleX: 1055,
+    castleY: 410,
+    waypoints: [
+      { x: 96, y: 220 },
+      { x: 415, y: 220 },
+      { x: 655, y: 345 },
+      { x: 830, y: 410 },
+      { x: 1055, y: 410 },
+    ],
+    routes: [
+      makeBranch('r1', 1, 'Vento Noroeste', 1, '#FF2E4C', [
+        { x: 96, y: 220 },
+        { x: 415, y: 220 },
+        { x: 655, y: 345 },
+        { x: 830, y: 410 },
+        { x: 1055, y: 410 },
+      ]),
+      makeBranch('r2', 2, 'Vento Sudoeste', 2, '#00D4FF', [
+        { x: 96, y: 600 },
+        { x: 415, y: 600 },
+        { x: 655, y: 475 },
+        { x: 830, y: 410 },
+        { x: 1055, y: 410 },
+      ]),
+      makeBranch('r3', 3, 'Vento Norte', 3, '#FACC15', [
+        { x: 655, y: 118 },
+        { x: 655, y: 235 },
+        { x: 830, y: 410 },
+        { x: 1055, y: 410 },
+      ]),
+      makeBranch('r4', 4, 'Vento Sul', 4, '#A855F7', [
+        { x: 655, y: 700 },
+        { x: 655, y: 585 },
+        { x: 830, y: 410 },
+        { x: 1055, y: 410 },
+      ]),
+    ],
+    heroStartSlotId: 's14-5',
+    trioStartSlotIds: ['s14-5', 's14-7', 's14-8'],
+    slots: [
+      { id: 's14-1', x: 185, y: 325, zone: 1, angle: 0 },
+      { id: 's14-2', x: 185, y: 495, zone: 1, angle: 0 },
+      { id: 's14-3', x: 340, y: 325, zone: 2, angle: 0 },
+      { id: 's14-4', x: 340, y: 495, zone: 2, angle: 0 },
+      { id: 's14-5', x: 485, y: 410, zone: 2, angle: 0 },
+      { id: 's14-6', x: 635, y: 410, zone: 3, angle: 0 },
+      { id: 's14-7', x: 540, y: 175, zone: 2, angle: Math.PI * 0.5 },
+      { id: 's14-8', x: 540, y: 645, zone: 2, angle: -Math.PI * 0.5 },
+      { id: 's14-9', x: 800, y: 235, zone: 3, angle: Math.PI * 0.5 },
+      { id: 's14-10', x: 800, y: 585, zone: 3, angle: -Math.PI * 0.5 },
+      { id: 's14-11', x: 930, y: 315, zone: 4, angle: Math.PI * 0.5 },
+      { id: 's14-12', x: 930, y: 505, zone: 4, angle: -Math.PI * 0.5 },
+    ],
+  },
+  // 14: 4 Routes — Cruzamento Abissal (4 Corners converging on 795, 410)
+  {
+    stage: 15,
+    title: 'Cruzamento Abissal',
+    routeArchetype: '4 Rotas · Quatro Cantos',
+    initialRouteLevel: 1,
+    castleX: 795,
+    castleY: 410,
+    waypoints: [
+      { x: 96, y: 235 },
+      { x: 375, y: 235 },
+      { x: 565, y: 370 },
+      { x: 795, y: 410 },
+    ],
+    routes: [
+      makeBranch('r1', 1, 'Canto Noroeste', 1, '#FF2E4C', [
+        { x: 96, y: 235 },
+        { x: 375, y: 235 },
+        { x: 565, y: 370 },
+        { x: 795, y: 410 },
+      ]),
+      makeBranch('r2', 2, 'Canto Sudoeste', 2, '#00D4FF', [
+        { x: 96, y: 585 },
+        { x: 375, y: 585 },
+        { x: 565, y: 450 },
+        { x: 795, y: 410 },
+      ]),
+      makeBranch('r3', 3, 'Canto Nordeste', 3, '#FACC15', [
+        { x: 965, y: 155 },
+        { x: 965, y: 275 },
+        { x: 915, y: 345 },
+        { x: 795, y: 410 },
+      ]),
+      makeBranch('r4', 4, 'Canto Sudeste', 4, '#A855F7', [
+        { x: 1095, y: 625 },
+        { x: 970, y: 625 },
+        { x: 925, y: 480 },
+        { x: 795, y: 410 },
+      ]),
+    ],
+    heroStartSlotId: 's15-5',
+    trioStartSlotIds: ['s15-5', 's15-7', 's15-8'],
+    slots: [
+      { id: 's15-1', x: 185, y: 345, zone: 1, angle: 0 },
+      { id: 's15-2', x: 185, y: 475, zone: 1, angle: 0 },
+      { id: 's15-3', x: 345, y: 345, zone: 2, angle: 0 },
+      { id: 's15-4', x: 345, y: 475, zone: 2, angle: 0 },
+      { id: 's15-5', x: 485, y: 410, zone: 2, angle: 0 },
+      { id: 's15-6', x: 575, y: 225, zone: 3, angle: Math.PI * 0.5 },
+      { id: 's15-7', x: 575, y: 595, zone: 3, angle: -Math.PI * 0.5 },
+      { id: 's15-8', x: 735, y: 265, zone: 3, angle: Math.PI * 0.5 },
+      { id: 's15-9', x: 735, y: 555, zone: 3, angle: -Math.PI * 0.5 },
+      { id: 's15-10', x: 1030, y: 335, zone: 4, angle: Math.PI },
+      { id: 's15-11', x: 1030, y: 485, zone: 4, angle: Math.PI },
+      { id: 's15-12', x: 890, y: 245, zone: 4, angle: Math.PI * 0.5 },
+    ],
+  },
+  // 15: 4 Routes — Coroa do Imperador
+  {
+    stage: 16,
+    title: 'Coroa do Imperador',
+    routeArchetype: '4 Rotas · Coroa Real',
+    initialRouteLevel: 1,
+    castleX: 1055,
+    castleY: 410,
+    waypoints: [
+      { x: 96, y: 410 },
+      { x: 805, y: 410 },
+      { x: 1055, y: 410 },
+    ],
+    routes: [
+      makeBranch('r1', 1, 'Eixo Imperial', 1, '#FF2E4C', [
+        { x: 96, y: 410 },
+        { x: 805, y: 410 },
+        { x: 1055, y: 410 },
+      ]),
+      makeBranch('r2', 2, 'Corredor Alto', 2, '#00D4FF', [
+        { x: 96, y: 185 },
+        { x: 480, y: 185 },
+        { x: 685, y: 325 },
+        { x: 805, y: 410 },
+        { x: 1055, y: 410 },
+      ]),
+      makeBranch('r3', 3, 'Corredor Baixo', 3, '#FACC15', [
+        { x: 96, y: 635 },
+        { x: 480, y: 635 },
+        { x: 685, y: 495 },
+        { x: 805, y: 410 },
+        { x: 1055, y: 410 },
+      ]),
+      makeBranch('r4', 4, 'Fenda Real', 4, '#A855F7', [
+        { x: 755, y: 118 },
+        { x: 755, y: 245 },
+        { x: 915, y: 410 },
+        { x: 1055, y: 410 },
+      ]),
+    ],
+    heroStartSlotId: 's16-5',
+    trioStartSlotIds: ['s16-5', 's16-6', 's16-9'],
+    slots: [
+      { id: 's16-1', x: 185, y: 295, zone: 1, angle: 0 },
+      { id: 's16-2', x: 185, y: 525, zone: 1, angle: 0 },
+      { id: 's16-3', x: 365, y: 295, zone: 2, angle: 0 },
+      { id: 's16-4', x: 365, y: 525, zone: 2, angle: 0 },
+      { id: 's16-5', x: 520, y: 320, zone: 2, angle: 0 },
+      { id: 's16-6', x: 520, y: 500, zone: 2, angle: 0 },
+      { id: 's16-7', x: 630, y: 185, zone: 3, angle: Math.PI * 0.5 },
+      { id: 's16-8', x: 695, y: 595, zone: 3, angle: -Math.PI * 0.5 },
+      { id: 's16-9', x: 895, y: 265, zone: 4, angle: Math.PI * 0.5 },
+      { id: 's16-10', x: 855, y: 525, zone: 4, angle: -Math.PI * 0.5 },
+      { id: 's16-11', x: 970, y: 315, zone: 4, angle: Math.PI * 0.5 },
+      { id: 's16-12', x: 970, y: 505, zone: 4, angle: -Math.PI * 0.5 },
     ],
   },
 ];
 
-export function getStageRouteDefinition(stageNumber: number): StageRouteDefinition {
+// Non-standardized irregular stage-to-template mapping (1 to 4 routes mixed organically)
+const NON_STANDARD_TEMPLATE_SEQUENCE: ReadonlyArray<number> = [
+  0, // St 1: 1 route
+  1, // St 2: 1 route
+  4, // St 3: 2 routes (Pinça do Norte)
+  2, // St 4: 1 route (unless Convergence)
+  8, // St 5: 3 routes (Cerco do Tridente)
+  5, // St 6: 2 routes
+  3, // St 7: 1 route
+  12, // St 8: 4 routes (Quatro Portões)
+  6, // St 9: 2 routes
+  9, // St 10: 3 routes
+  13, // St 11: 4 routes
+  7, // St 12: 2 routes
+  10, // St 13: 3 routes
+  14, // St 14: 4 routes
+  11, // St 15: 3 routes
+  15, // St 16: 4 routes
+];
+
+export function getStageRouteDefinition(
+  stageNumber: number,
+  isConvergenceStage = false
+): StageRouteDefinition {
   const stage = Math.max(1, Math.min(TOTAL_STAGES, Math.floor(stageNumber)));
-  return STAGE_ROUTES[stage - 1] ?? STAGE_ROUTES[0];
+  const seqPos = (stage - 1) % NON_STANDARD_TEMPLATE_SEQUENCE.length;
+  let templateIndex = NON_STANDARD_TEMPLATE_SEQUENCE[seqPos];
+  const cycle = Math.floor((stage - 1) / NON_STANDARD_TEMPLATE_SEQUENCE.length);
+
+  // Convergence stages (every 4-8 stages) always use a multi-gate 3 or 4 route siege!
+  if (isConvergenceStage && STAGE_ROUTES[templateIndex].routes.length < 3) {
+    const multiPool = [8, 12, 9, 13, 10, 14, 11, 15];
+    templateIndex = multiPool[(stage * 3 + cycle) % multiPool.length];
+  }
+
+  const template = STAGE_ROUTES[templateIndex] ?? STAGE_ROUTES[0];
+  const mirrorY = cycle % 2 === 1;
+  const transformY = (y: number) => (mirrorY ? 810 - y : y);
+
+  // As campaign deepens, some multi-route maps start with 2 open gates right away!
+  const initialRouteLevel =
+    template.routes.length >= 3 && (isConvergenceStage || stage >= 18)
+      ? Math.min(2, template.routes.length)
+      : template.initialRouteLevel;
+
+  return {
+    stage,
+    title:
+      cycle === 0
+        ? template.title
+        : `${template.title} ${cycle >= 2 ? `· Ato ${cycle + 1}` : '· Invertida'}`,
+    routeArchetype: mirrorY ? `${template.routeArchetype} (Espelho)` : template.routeArchetype,
+    initialRouteLevel,
+    castleX: template.castleX,
+    castleY: transformY(template.castleY),
+    waypoints: template.waypoints.map((w) => ({ x: w.x, y: transformY(w.y) })),
+    routes: template.routes.map((r) => ({
+      ...r,
+      waypoints: r.waypoints.map((w) => ({ x: w.x, y: transformY(w.y) })),
+    })),
+    heroStartSlotId: `s${stage}-hero`,
+    trioStartSlotIds: (template.trioStartSlotIds ?? [
+      template.heroStartSlotId,
+      template.slots[0]?.id ?? template.heroStartSlotId,
+      template.slots[template.slots.length - 1]?.id ?? template.heroStartSlotId,
+    ]).map((origId) => {
+      if (origId === template.heroStartSlotId) return `s${stage}-hero`;
+      const idx = template.slots.findIndex((s) => s.id === origId);
+      return idx >= 0 ? `s${stage}-${idx + 1}` : `s${stage}-1`;
+    }),
+    slots: template.slots.map((s: SlotCoord, idx: number) => ({
+      id: s.id === template.heroStartSlotId ? `s${stage}-hero` : `s${stage}-${idx + 1}`,
+      x: s.x,
+      y: transformY(s.y),
+      zone: s.zone,
+      angle: mirrorY ? -s.angle : s.angle,
+    })),
+  };
 }
 
-export function buildArenaForStage(stageNumber: number): ArenaConfig {
-  const route = getStageRouteDefinition(stageNumber);
+export function buildArenaForStage(
+  stageNumber: number,
+  isConvergenceStage = false
+): ArenaConfig {
+  const route = getStageRouteDefinition(stageNumber, isConvergenceStage);
   return {
     stage: route.stage,
     worldWidth: DEFAULT_ARENA.worldWidth,
@@ -377,24 +958,129 @@ export function buildArenaForStage(stageNumber: number): ArenaConfig {
     castleRadius: DEFAULT_ARENA.castleRadius,
     roadHalfWidth: DEFAULT_ARENA.roadHalfWidth,
     waypoints: route.waypoints,
+    routes: route.routes,
   };
 }
 
-export function getStageConfig(stageNumber: number): StageConfig {
+export function getStageConfig(
+  stageNumber: number,
+  convergenceStages: ReadonlyArray<number> = []
+): StageConfig {
   const stage = Math.max(1, Math.min(TOTAL_STAGES, Math.floor(stageNumber)));
-  const route = getStageRouteDefinition(stage);
-  const totalWaves = stage === 1 ? 2 : stage <= 4 ? 3 : stage <= 8 ? 4 : 5;
+  const isConvergenceStage = convergenceStages.includes(stage);
+  const route = getStageRouteDefinition(stage, isConvergenceStage);
+  const baseWaves = stage === 1 ? 2 : stage <= 6 ? 3 : stage <= 25 ? 4 : 5;
+  const totalWaves = isConvergenceStage ? Math.max(4, baseWaves) : baseWaves;
+  const isFiveLevelMilestone = stage % 5 === 0;
+  const enemyUnlock = getEnemyUnlockForStage(stage);
+  const allyUnlock = getAllyUnlockForStage(stage);
+
   return {
     stage,
     title: route.title,
     routeArchetype: route.routeArchetype,
+    routeCount: route.routes.length,
+    initialRouteLevel: route.initialRouteLevel,
+    isConvergenceStage,
     totalWaves,
-    baseEnemiesPerWave: 6 + stage * 2,
-    hpMultiplier: 1 + (stage - 1) * 0.21,
-    speedMultiplier: Math.min(1.48, 1 + (stage - 1) * 0.045),
-    spawnInterval: Math.max(0.46, 1.3 - (stage - 1) * 0.075),
-    bossHp: Math.round(280 + (stage - 1) * 140),
+    baseEnemiesPerWave:
+      Math.min(34, 8 + Math.round(stage * 0.65)) + (isConvergenceStage ? 6 : 0),
+    hpMultiplier: (1 + (stage - 1) * 0.085) * (isConvergenceStage ? 1.38 : 1),
+    speedMultiplier: Math.min(1.72, 1.04 + (stage - 1) * 0.008) * (isConvergenceStage ? 1.06 : 1),
+    spawnInterval: Math.max(
+      0.28,
+      (1.14 - (stage - 1) * 0.012) * (isConvergenceStage ? 0.85 : 1)
+    ),
+    bossHp:
+      stage >= TOTAL_STAGES
+        ? 25000
+        : Math.round((320 + (stage - 1) * 145) * (isConvergenceStage ? 1.45 : 1)),
+    isFiveLevelMilestone,
+    unlockedEnemyLabel: enemyUnlock?.name,
+    unlockedEnemyId: enemyUnlock?.id,
+    unlockedAllyLabel: allyUnlock?.name,
+    unlockedAllyId: allyUnlock?.id,
   };
+}
+
+export function computeEnemyEssenceReward(
+  kind: EnemyKind,
+  stage: number,
+  overchargeActive: boolean
+): number {
+  let base = 4;
+  if (kind === 'shielded') base = 6;
+  else if (kind === 'brute') base = 9;
+  else if (kind === 'stalker') base = 10;
+  else if (kind === 'pyro') base = 11;
+  else if (kind === 'titan') base = 14;
+  else if (kind === 'reaper') base = 16;
+  else if (kind === 'boss') base = 24 + Math.max(1, stage) * 2;
+  return overchargeActive ? Math.round(base * 1.5) : base;
+}
+
+export function crossedHeroUpgradeMilestone(
+  previousLevel: number,
+  newLevel: number
+): number | null {
+  for (let lvl = Math.max(1, previousLevel) + 1; lvl <= newLevel; lvl++) {
+    if (lvl % 5 === 0) return lvl;
+  }
+  return null;
+}
+
+export function getHeroEvolutionCost(currentLevel: number): number {
+  const lvl = Math.max(1, Math.min(MAX_HERO_LEVEL, currentLevel));
+  return Math.max(1, Math.floor(1 + (lvl - 1) * 0.45));
+}
+
+export function getHeroRankTitle(level: number): string {
+  if (level >= 25) return 'Mítico';
+  if (level >= 20) return 'Lendário';
+  if (level >= 15) return 'Mestre';
+  if (level >= 10) return 'Campeão';
+  if (level >= 5) return 'Veterano';
+  if (level >= 3) return 'Guardião';
+  return 'Aprendiz';
+}
+
+export function isValidFreeHeroPosition(
+  worldX: number,
+  worldY: number,
+  arena: ArenaConfig,
+  otherHeroes: ReadonlyArray<{ x: number; y: number }> = []
+): boolean {
+  if (worldX < 85 || worldX > arena.worldWidth - 85) return false;
+  if (worldY < 110 || worldY > arena.worldHeight - 125) return false;
+
+  // Must not stand inside the Castle
+  if (distanceBetween(worldX, worldY, arena.castleX, arena.castleY) < arena.castleRadius + 24) {
+    return false;
+  }
+
+  // Must stay clear of every route road & gate portal
+  for (const branch of arena.routes) {
+    const start = branch.waypoints[0];
+    if (start && distanceBetween(worldX, worldY, start.x, start.y) < 48) {
+      return false;
+    }
+    for (let i = 0; i < branch.waypoints.length - 1; i++) {
+      const a = branch.waypoints[i];
+      const b = branch.waypoints[i + 1];
+      if (pointToSegmentDistance(worldX, worldY, a.x, a.y, b.x, b.y) < arena.roadHalfWidth + 14) {
+        return false;
+      }
+    }
+  }
+
+  // Keep enough spacing from other deployed heroes so clicks never overlap
+  for (const other of otherHeroes) {
+    if (distanceBetween(worldX, worldY, other.x, other.y) < 42) {
+      return false;
+    }
+  }
+
+  return true;
 }
 
 export function computeViewportTransform(
@@ -433,8 +1119,11 @@ export function formatSurvivalTime(totalSeconds: number): string {
   return `${String(mins).padStart(2, '0')}:${String(rem).padStart(2, '0')}`;
 }
 
-export function buildArenaSlots(arena: ArenaConfig = DEFAULT_ARENA): ArenaSlot[] {
-  const route = getStageRouteDefinition(arena.stage);
+export function buildArenaSlots(
+  arena: ArenaConfig = DEFAULT_ARENA,
+  isConvergenceStage = false
+): ArenaSlot[] {
+  const route = getStageRouteDefinition(arena.stage, isConvergenceStage);
   return route.slots.map((c) => ({
     id: c.id,
     x: c.x,
@@ -480,13 +1169,17 @@ export function getHeroStatsForLevel(
 } {
   const spec = HERO_SPECS[heroClass];
   const delta = Math.max(0, Math.min(MAX_HERO_LEVEL, level) - 1);
+  const earlyDelta = Math.min(14, delta);
+  const lateDelta = Math.max(0, delta - 14);
+  const damageMult = Math.pow(1.24, earlyDelta) * Math.pow(1.13, lateDelta);
+
   return {
-    damage: Math.round(spec.damage * Math.pow(1.34, delta)),
-    cooldown: Math.max(0.2, Number((spec.cooldown * Math.pow(0.91, delta)).toFixed(3))),
-    range: Math.round(spec.range * (1 + delta * 0.06)),
-    critChance: Math.min(0.68, Number((spec.critChance + delta * 0.045).toFixed(3))),
+    damage: Math.round(spec.damage * damageMult),
+    cooldown: Math.max(0.15, Number((spec.cooldown * Math.pow(0.935, earlyDelta) * Math.pow(0.97, lateDelta)).toFixed(3))),
+    range: Math.round(spec.range * (1 + Math.min(0.9, delta * 0.036))),
+    critChance: Math.min(0.75, Number((spec.critChance + delta * 0.024).toFixed(3))),
     blastRadius:
-      spec.blastRadius > 0 ? Math.round(spec.blastRadius * (1 + delta * 0.08)) : 0,
+      spec.blastRadius > 0 ? Math.round(spec.blastRadius * (1 + Math.min(1.1, delta * 0.045))) : 0,
   };
 }
 
@@ -773,7 +1466,6 @@ export function findNearestEnemyInRange(
     const distFromUnit = distanceBetween(unit.x, unit.y, enemy.x, enemy.y);
     if (distFromUnit > unit.range + enemy.radius) continue;
 
-    // Prioritize enemy furthest along the path toward the Castle
     if (
       enemy.pathProgress > bestProgress + 0.002 ||
       (Math.abs(enemy.pathProgress - bestProgress) <= 0.002 && distFromUnit < bestDist)
@@ -815,21 +1507,63 @@ export function findEnemiesInSlashArc(
   return hit;
 }
 
+export function getEnemyResistanceMultiplier(
+  enemy: Pick<EnemyEntity, 'kind' | 'bracingTimer' | 'corrosionTimer'>,
+  byHero = false
+): number {
+  const hasCorrosion = (enemy.corrosionTimer ?? 0) > 0;
+  if (hasCorrosion) {
+    return enemy.kind === 'boss' || enemy.kind === 'titan' ? 1.08 : 1.2;
+  }
+
+  let baseMult = 1;
+  if (enemy.kind === 'pyro') {
+    baseMult = 0.88;
+  } else if (enemy.kind === 'brute') {
+    baseMult = 0.72;
+  } else if (enemy.kind === 'shielded') {
+    baseMult = enemy.bracingTimer > 0 ? 0.42 : 0.65;
+  } else if (enemy.kind === 'reaper') {
+    baseMult = 0.6;
+  } else if (enemy.kind === 'titan') {
+    baseMult = enemy.bracingTimer > 0 ? 0.34 : 0.5;
+  } else if (enemy.kind === 'boss') {
+    baseMult = 0.48;
+  }
+
+  const isToughTarget =
+    enemy.kind === 'shielded' ||
+    enemy.kind === 'brute' ||
+    enemy.kind === 'titan' ||
+    enemy.kind === 'reaper' ||
+    enemy.kind === 'boss';
+
+  if (byHero && isToughTarget) {
+    baseMult *= 0.85;
+  }
+
+  return baseMult;
+}
+
 export function applyDamageToEnemy(
   enemy: EnemyEntity,
-  rawDamage: number
+  rawDamage: number,
+  options?: { byHero?: boolean }
 ): { actualDamage: number; killed: boolean } {
   if (enemy.isDead || enemy.hp <= 0) {
     return { actualDamage: 0, killed: false };
   }
-  const mitigation = enemy.kind === 'shielded' && enemy.bracingTimer > 0 ? 0.55 : 1;
-  const actualDamage = Math.max(1, Math.round(rawDamage * mitigation));
+  const resistanceMult = getEnemyResistanceMultiplier(enemy, options?.byHero ?? false);
+  const actualDamage = Math.max(1, Math.round(rawDamage * resistanceMult));
   enemy.hp = Math.max(0, enemy.hp - actualDamage);
   enemy.hitFlash = 0.08;
 
   if (enemy.hp <= 0) {
     enemy.isDead = true;
-    enemy.koTimer = enemy.kind === 'boss' ? 0.55 : 0.32;
+    enemy.koTimer =
+      enemy.kind === 'boss' || enemy.kind === 'titan' || enemy.kind === 'reaper'
+        ? 0.52
+        : 0.32;
     return { actualDamage, killed: true };
   }
   return { actualDamage, killed: false };
@@ -858,7 +1592,12 @@ export function findBlockingUnitForEnemy(
 
   for (const unit of units) {
     if (unit.hp <= 0) continue;
-    const blockRadius = unit.kind === 'shield' ? 30 : 24;
+    const blockRadius =
+      unit.kind === 'golem'
+        ? 36
+        : unit.kind === 'shield' || unit.kind === 'swordsman_ally' || unit.kind === 'paladin'
+          ? 30
+          : 24;
     const dist = distanceBetween(enemy.x, enemy.y, unit.x, unit.y);
     if (dist <= enemy.radius + blockRadius && dist < closestDist) {
       closestDist = dist;
@@ -909,7 +1648,8 @@ export function applyDamageToBase(
 
 export function computeWaveConfig(
   wave: number,
-  stage = 1
+  stage = 1,
+  convergenceStages: ReadonlyArray<number> = []
 ): {
   totalEnemies: number;
   spawnInterval: number;
@@ -919,23 +1659,50 @@ export function computeWaveConfig(
   bossHp: number;
   mix: Record<Exclude<EnemyKind, 'boss'>, number>;
 } {
-  const stageCfg = getStageConfig(stage);
+  const stageCfg = getStageConfig(stage, convergenceStages);
   const clampedWave = Math.max(1, wave);
-  const totalEnemies = stageCfg.baseEnemiesPerWave + (clampedWave - 1) * 3;
-  const spawnInterval = Math.max(0.38, stageCfg.spawnInterval - (clampedWave - 1) * 0.075);
+  const totalEnemies = stageCfg.baseEnemiesPerWave + (clampedWave - 1) * 4;
+  const spawnInterval = Math.max(0.24, stageCfg.spawnInterval - (clampedWave - 1) * 0.065);
   const hpMultiplier = stageCfg.hpMultiplier * (1 + (clampedWave - 1) * 0.18);
-  const speedMultiplier = Math.min(1.58, stageCfg.speedMultiplier + (clampedWave - 1) * 0.035);
+  const speedMultiplier = Math.min(1.78, stageCfg.speedMultiplier + (clampedWave - 1) * 0.035);
 
-  // Smooth spaced introduction of armored & brute enemies across waves and stages
+  const stalkerWeight =
+    stage >= 8
+      ? Math.min(0.22, 0.1 + (stage - 8) * 0.008 + (clampedWave - 1) * 0.02)
+      : stage >= 3
+        ? Math.min(0.16, 0.08 + (clampedWave - 1) * 0.02)
+        : 0;
+  const pyroWeight =
+    stage >= 23
+      ? Math.min(0.18, 0.09 + (stage - 23) * 0.006 + (clampedWave - 1) * 0.015)
+      : stage >= 5
+        ? Math.min(0.12, 0.06 + (clampedWave - 1) * 0.015)
+        : 0;
+  const titanWeight =
+    stage >= 70
+      ? Math.min(0.18, 0.09 + (stage - 70) * 0.004 + (clampedWave - 1) * 0.015)
+      : stage >= 8
+        ? Math.min(0.12, 0.06 + (clampedWave - 1) * 0.015)
+        : 0;
+  const reaperWeight =
+    stage >= 116
+      ? Math.min(0.16, 0.09 + (clampedWave - 1) * 0.015)
+      : stage >= 10
+        ? Math.min(0.1, 0.06 + (clampedWave - 1) * 0.01)
+        : 0;
+
   const bruteWeight =
     stage === 1 && clampedWave === 1
-      ? 0
-      : Math.min(0.32, 0.07 + (stage - 1) * 0.028 + (clampedWave - 1) * 0.045);
+      ? 0.06
+      : Math.min(0.26, 0.09 + (stage - 1) * 0.01 + (clampedWave - 1) * 0.03);
   const shieldedWeight =
     stage === 1 && clampedWave === 1
-      ? 0.16
-      : Math.min(0.38, 0.2 + (stage - 1) * 0.02 + (clampedWave - 1) * 0.04);
-  const walkerWeight = Math.max(0.28, 1 - bruteWeight - shieldedWeight);
+      ? 0.2
+      : Math.min(0.3, 0.2 + (stage - 1) * 0.008 + (clampedWave - 1) * 0.02);
+  const walkerWeight = Math.max(
+    0.14,
+    1 - bruteWeight - shieldedWeight - stalkerWeight - pyroWeight - titanWeight - reaperWeight
+  );
 
   return {
     totalEnemies,
@@ -948,6 +1715,10 @@ export function computeWaveConfig(
       walker: walkerWeight,
       shielded: shieldedWeight,
       brute: bruteWeight,
+      stalker: stalkerWeight,
+      pyro: pyroWeight,
+      titan: titanWeight,
+      reaper: reaperWeight,
     },
   };
 }

@@ -1,4 +1,4 @@
-import { canMergeUnits, pointToSegmentDistance } from './engineMath';
+import { canMergeUnits, isValidFreeHeroPosition, pointToSegmentDistance } from './engineMath';
 import { GameSimulation } from './simulation';
 import {
   ArenaConfig,
@@ -8,6 +8,7 @@ import {
   HeroEntity,
   MAX_HERO_LEVEL,
   MAX_UNIT_LEVEL,
+  RouteWaypoint,
   UNIT_SPECS,
   UnitEntity,
   UnitKind,
@@ -18,7 +19,8 @@ export class ArenaRenderer {
   private staticArenaKey = '';
 
   private ensureStaticLayer(arena: ArenaConfig): HTMLCanvasElement {
-    const key = `stage-${arena.stage}-${arena.worldWidth}x${arena.worldHeight}-dark-v3`;
+    const routeSig = arena.routes.map((r) => r.id).join(',');
+    const key = `stage-${arena.stage}-${arena.worldWidth}x${arena.worldHeight}-${routeSig}-dark-v4`;
     if (this.staticCanvas && this.staticArenaKey === key) {
       return this.staticCanvas;
     }
@@ -33,8 +35,7 @@ export class ArenaRenderer {
     return canvas;
   }
 
-  private traceRoutePath(ctx: CanvasRenderingContext2D, arena: ArenaConfig) {
-    const wps = arena.waypoints;
+  private traceBranchPath(ctx: CanvasRenderingContext2D, wps: ReadonlyArray<RouteWaypoint>) {
     if (wps.length === 0) return;
     ctx.beginPath();
     ctx.moveTo(wps[0].x, wps[0].y);
@@ -45,10 +46,12 @@ export class ArenaRenderer {
 
   private minDistanceToRoute(x: number, y: number, arena: ArenaConfig): number {
     let minD = Infinity;
-    const wps = arena.waypoints;
-    for (let i = 0; i < wps.length - 1; i++) {
-      const d = pointToSegmentDistance(x, y, wps[i].x, wps[i].y, wps[i + 1].x, wps[i + 1].y);
-      if (d < minD) minD = d;
+    for (const branch of arena.routes) {
+      const wps = branch.waypoints;
+      for (let i = 0; i < wps.length - 1; i++) {
+        const d = pointToSegmentDistance(x, y, wps[i].x, wps[i].y, wps[i + 1].x, wps[i + 1].y);
+        if (d < minD) minD = d;
+      }
     }
     return minD;
   }
@@ -95,74 +98,88 @@ export class ArenaRenderer {
       ctx.fill();
     }
 
-    // 2. Dynamic Winding Obsidian Stone Route with Glowing Gold & Electric Edge Guides
+    // 2. Dynamic Multi-Route Obsidian Stone Roads (1 to 4 Branches)
     const roadW = arena.roadHalfWidth * 2;
     ctx.save();
     ctx.lineCap = 'round';
     ctx.lineJoin = 'round';
 
-    // Outer ambient road shadow
+    // Layer 1: Outer ambient road shadow across all routes
     ctx.save();
     ctx.translate(0, 8);
-    this.traceRoutePath(ctx, arena);
     ctx.strokeStyle = 'rgba(2, 6, 23, 0.65)';
     ctx.lineWidth = roadW + 18;
-    ctx.stroke();
+    for (const branch of arena.routes) {
+      this.traceBranchPath(ctx, branch.waypoints);
+      ctx.stroke();
+    }
     ctx.restore();
 
-    // Warm Amber-Gold outer border rim (high contrast against dark ground)
-    this.traceRoutePath(ctx, arena);
+    // Layer 2: Warm Amber-Gold outer border rim
     ctx.strokeStyle = '#92400E';
     ctx.lineWidth = roadW + 12;
-    ctx.stroke();
+    for (const branch of arena.routes) {
+      this.traceBranchPath(ctx, branch.waypoints);
+      ctx.stroke();
+    }
 
-    // Saturated gold inner trim
-    this.traceRoutePath(ctx, arena);
+    // Layer 3: Saturated gold inner trim
     ctx.strokeStyle = '#D97706';
     ctx.lineWidth = roadW + 6;
-    ctx.stroke();
+    for (const branch of arena.routes) {
+      this.traceBranchPath(ctx, branch.waypoints);
+      ctx.stroke();
+    }
 
-    // Dark carved slate road surface (makes red/gold/blue enemies pop vividly!)
-    this.traceRoutePath(ctx, arena);
+    // Layer 4: Dark carved slate road surface
     ctx.strokeStyle = '#1E293B';
     ctx.lineWidth = roadW;
-    ctx.stroke();
+    for (const branch of arena.routes) {
+      this.traceBranchPath(ctx, branch.waypoints);
+      ctx.stroke();
+    }
 
-    // Inner worn center lane
-    this.traceRoutePath(ctx, arena);
+    // Layer 5: Inner worn center lane
     ctx.strokeStyle = '#273549';
     ctx.lineWidth = roadW * 0.56;
-    ctx.stroke();
+    for (const branch of arena.routes) {
+      this.traceBranchPath(ctx, branch.waypoints);
+      ctx.stroke();
+    }
 
-    // Glowing directional chevrons & stone seams
-    const wps = arena.waypoints;
-    for (let i = 0; i < wps.length - 1; i++) {
-      const a = wps[i];
-      const b = wps[i + 1];
-      const dx = b.x - a.x;
-      const dy = b.y - a.y;
-      const segLen = Math.hypot(dx, dy);
-      const ang = Math.atan2(dy, dx);
-      if (segLen < 32) continue;
+    // Layer 6: Glowing directional chevrons along each route branch
+    for (const branch of arena.routes) {
+      const wps = branch.waypoints;
+      for (let i = 0; i < wps.length - 1; i++) {
+        const a = wps[i];
+        const b = wps[i + 1];
+        const dx = b.x - a.x;
+        const dy = b.y - a.y;
+        const segLen = Math.hypot(dx, dy);
+        const ang = Math.atan2(dy, dx);
+        if (segLen < 32) continue;
 
-      const steps = Math.max(1, Math.floor(segLen / 54));
-      for (let s = 1; s <= steps; s++) {
-        const t = s / (steps + 1);
-        const px = a.x + dx * t;
-        const py = a.y + dy * t;
+        const steps = Math.max(1, Math.floor(segLen / 54));
+        for (let s = 1; s <= steps; s++) {
+          const t = s / (steps + 1);
+          const px = a.x + dx * t;
+          const py = a.y + dy * t;
 
-        if (s % 2 === 1) {
-          ctx.save();
-          ctx.translate(px, py);
-          ctx.rotate(ang);
-          ctx.strokeStyle = 'rgba(250, 204, 21, 0.36)';
-          ctx.lineWidth = 3;
-          ctx.beginPath();
-          ctx.moveTo(-5, -7);
-          ctx.lineTo(4, 0);
-          ctx.lineTo(-5, 7);
-          ctx.stroke();
-          ctx.restore();
+          if (s % 2 === 1) {
+            ctx.save();
+            ctx.translate(px, py);
+            ctx.rotate(ang);
+            ctx.strokeStyle =
+              branch.gateIndex === 1 ? 'rgba(250, 204, 21, 0.36)' : branch.color;
+            ctx.globalAlpha = branch.gateIndex === 1 ? 1 : 0.42;
+            ctx.lineWidth = 3;
+            ctx.beginPath();
+            ctx.moveTo(-5, -7);
+            ctx.lineTo(4, 0);
+            ctx.lineTo(-5, 7);
+            ctx.stroke();
+            ctx.restore();
+          }
         }
       }
     }
@@ -361,9 +378,45 @@ export class ArenaRenderer {
         const spec = UNIT_SPECS[sim.selectedUnit];
         this.drawRangeRing(ctx, slot.x, slot.y, spec.range, 'rgba(0, 212, 255, 0.55)');
       }
-      if ((slot.hasHero && isHovered) || (sim.heroRepositionMode && isHovered)) {
-        this.drawRangeRing(ctx, slot.x, slot.y, sim.hero.range, 'rgba(250, 204, 21, 0.65)');
+      const slotHero = slot.hasHero ? sim.heroes.find((h) => h.slotId === slot.id) : undefined;
+      if ((slotHero && isHovered) || (sim.heroRepositionMode && isHovered)) {
+        const rangeHero = slotHero ?? sim.hero;
+        this.drawRangeRing(ctx, slot.x, slot.y, rangeHero.range, 'rgba(250, 204, 21, 0.65)');
       }
+      ctx.restore();
+    }
+
+    // 1.5 Free Hero Placement Tactical Reticle (anywhere outside roads/castle/gates)
+    if (
+      sim.phase === 'playing' &&
+      !sim.hoveredSlotId &&
+      ((drag?.source === 'hero' && drag.hasMoved) || sim.heroRepositionMode)
+    ) {
+      const targetIdx = drag?.heroIndex ?? sim.activeHeroIndex;
+      const movingHero = sim.heroes[targetIdx] ?? sim.hero;
+      const px = drag?.worldX ?? sim.pointerWorldX;
+      const py = drag?.worldY ?? sim.pointerWorldY;
+      const otherHeroes = sim.heroes.filter((_, idx) => idx !== targetIdx);
+      const valid = isValidFreeHeroPosition(px, py, sim.arena, otherHeroes);
+      const ringColor = valid ? 'rgba(34, 197, 94, 0.85)' : 'rgba(255, 46, 76, 0.85)';
+
+      this.drawRangeRing(
+        ctx,
+        px,
+        py,
+        movingHero.range,
+        valid ? 'rgba(250, 204, 21, 0.55)' : 'rgba(255, 46, 76, 0.45)'
+      );
+      ctx.save();
+      ctx.beginPath();
+      ctx.arc(px, py, 26, 0, Math.PI * 2);
+      ctx.fillStyle = valid ? 'rgba(34, 197, 94, 0.16)' : 'rgba(255, 46, 76, 0.16)';
+      ctx.fill();
+      ctx.lineWidth = 2.6;
+      ctx.setLineDash([5, 4]);
+      ctx.strokeStyle = ringColor;
+      ctx.stroke();
+      ctx.setLineDash([]);
       ctx.restore();
     }
 
@@ -411,20 +464,26 @@ export class ArenaRenderer {
       ctx.restore();
     }
 
-    // 3. Portal & Castle
-    this.drawSpawnPortal(ctx, sim);
+    // 3. Multi-Gate Portals & Castle
+    this.drawSpawnPortals(ctx, sim);
     this.drawCastleBase(ctx, sim);
 
-    // 4. Depth-sorted actors (Hero + Units + Enemies)
+    // 4. Depth-sorted actors (1 or 3 Main Heroes + Units + Enemies)
     type RenderItem =
-      | { kind: 'hero'; y: number; entity: HeroEntity }
+      | { kind: 'hero'; y: number; entity: HeroEntity; isSelected: boolean }
       | { kind: 'unit'; y: number; entity: UnitEntity }
       | { kind: 'enemy'; y: number; entity: EnemyEntity };
 
     const actors: RenderItem[] = [];
-    if (!(drag?.source === 'hero' && drag.hasMoved)) {
-      actors.push({ kind: 'hero', y: sim.hero.y, entity: sim.hero });
-    }
+    sim.heroes.forEach((h, idx) => {
+      if (drag?.source === 'hero' && drag.hasMoved && drag.heroIndex === idx) return;
+      actors.push({
+        kind: 'hero',
+        y: h.y,
+        entity: h,
+        isSelected: idx === sim.activeHeroIndex && (sim.heroes.length > 1 || sim.heroRepositionMode),
+      });
+    });
     for (const u of sim.units) {
       if (drag?.source === 'unit' && drag.hasMoved && drag.unitId === u.id) continue;
       actors.push({ kind: 'unit', y: u.y, entity: u });
@@ -434,7 +493,7 @@ export class ArenaRenderer {
 
     for (const item of actors) {
       if (item.kind === 'hero') {
-        this.drawHero(ctx, item.entity, sim.time);
+        this.drawHero(ctx, item.entity, sim.time, item.isSelected);
       } else if (item.kind === 'unit') {
         this.drawUnit(ctx, item.entity, sim.time);
       } else {
@@ -465,16 +524,23 @@ export class ArenaRenderer {
     // 6. Dragged Hero / Unit / Card preview
     if (drag && drag.hasMoved) {
       if (drag.source === 'hero') {
-        this.drawRangeRing(ctx, drag.worldX, drag.worldY, sim.hero.range, 'rgba(250, 204, 21, 0.7)');
+        const draggedHero = sim.heroes[drag.heroIndex ?? sim.activeHeroIndex] ?? sim.hero;
+        this.drawRangeRing(
+          ctx,
+          drag.worldX,
+          drag.worldY,
+          draggedHero.range,
+          'rgba(250, 204, 21, 0.7)'
+        );
         ctx.save();
         ctx.globalAlpha = 0.9;
         this.drawHeroSprite(
           ctx,
-          sim.hero.heroClass,
+          draggedHero.heroClass,
           drag.worldX,
           drag.worldY - 8,
-          sim.hero.level,
-          sim.hero.facingAngle,
+          draggedHero.level,
+          draggedHero.facingAngle,
           0,
           0,
           0,
@@ -637,10 +703,10 @@ export class ArenaRenderer {
       const alpha = Math.min(1, (ft.life / ft.maxLife) * 1.4);
       ctx.save();
       ctx.globalAlpha = alpha;
-      ctx.font = `800 ${Math.round(16 * ft.scale)}px "Fredoka", "Plus Jakarta Sans", sans-serif`;
+      ctx.font = `800 ${Math.round(13.5 * ft.scale)}px "Fredoka", "Plus Jakarta Sans", sans-serif`;
       ctx.textAlign = 'center';
       ctx.textBaseline = 'middle';
-      ctx.lineWidth = ft.isCrit ? 5 : 4;
+      ctx.lineWidth = ft.isCrit ? 4.5 : 3.5;
       ctx.strokeStyle = ft.isCrit ? '#450A0A' : '#020617';
       ctx.strokeText(ft.text, ft.x, ft.y);
       ctx.fillStyle = ft.color;
@@ -651,7 +717,30 @@ export class ArenaRenderer {
     ctx.restore();
   }
 
-  private drawHero(ctx: CanvasRenderingContext2D, hero: HeroEntity, time: number) {
+  private drawHero(ctx: CanvasRenderingContext2D, hero: HeroEntity, time: number, isSelected = false) {
+    if (hero.slotId === null) {
+      // Tactical rune pedestal for freely positioned hero anywhere on terrain
+      ctx.save();
+      ctx.fillStyle = 'rgba(0, 212, 255, 0.14)';
+      ctx.beginPath();
+      ctx.ellipse(hero.x, hero.y + 15, 29, 13, 0, 0, Math.PI * 2);
+      ctx.fill();
+      ctx.strokeStyle = '#FACC15';
+      ctx.lineWidth = 2.2;
+      ctx.setLineDash([5, 4]);
+      ctx.stroke();
+      ctx.setLineDash([]);
+      ctx.restore();
+    }
+    if (isSelected) {
+      ctx.save();
+      ctx.strokeStyle = '#00D4FF';
+      ctx.lineWidth = 2.6;
+      ctx.beginPath();
+      ctx.ellipse(hero.x, hero.y + 16, 34, 15, 0, 0, Math.PI * 2);
+      ctx.stroke();
+      ctx.restore();
+    }
     this.drawHeroSprite(
       ctx,
       hero.heroClass,
@@ -680,8 +769,8 @@ export class ArenaRenderer {
   ) {
     const spec = HERO_SPECS[heroClass];
     const idleBob = Math.sin(time * 4.2) * 1.8;
-    // Dynamic visual size increase per level!
-    const levelScale = 1.08 + (level - 1) * 0.12;
+    // Dynamic visual size increase across Lv.1-15
+    const levelScale = 1.06 + Math.min(14, Math.max(0, level - 1)) * 0.055;
     const scaleX = (1 + recoil * 0.14) * levelScale;
     const scaleY = (1 - recoil * 0.12) * levelScale;
     const faceRight = Math.cos(facingAngle) >= 0;
@@ -914,47 +1003,78 @@ export class ArenaRenderer {
     ctx.restore();
   }
 
-  private drawSpawnPortal(ctx: CanvasRenderingContext2D, sim: GameSimulation) {
-    const start = sim.arena.waypoints[0] ?? { x: 96, y: 410 };
-    const pulse = Math.sin(sim.time * 4.5) * 2.5;
+  private drawSpawnPortals(ctx: CanvasRenderingContext2D, sim: GameSimulation) {
+    const totalRoutes = sim.arena.routes.length;
+    for (const branch of sim.arena.routes) {
+      const start = branch.waypoints[0] ?? { x: 96, y: 410 };
+      const isOpen = branch.unlockRouteLevel <= sim.routeLevel;
+      const pulse = Math.sin(sim.time * 4.5 + branch.gateIndex) * 2.5;
 
-    ctx.save();
-    ctx.translate(start.x, start.y);
+      ctx.save();
+      ctx.translate(start.x, start.y);
 
-    ctx.fillStyle = 'rgba(2, 6, 23, 0.55)';
-    ctx.beginPath();
-    ctx.ellipse(0, 26, 36, 12, 0, 0, Math.PI * 2);
-    ctx.fill();
+      ctx.fillStyle = 'rgba(2, 6, 23, 0.55)';
+      ctx.beginPath();
+      ctx.ellipse(0, 26, 36, 12, 0, 0, Math.PI * 2);
+      ctx.fill();
 
-    ctx.fillStyle = '#334155';
-    ctx.strokeStyle = '#020617';
-    ctx.lineWidth = 3;
-    ctx.beginPath();
-    ctx.roundRect(-28, -32, 56, 56, 18);
-    ctx.fill();
-    ctx.stroke();
+      ctx.fillStyle = isOpen ? '#334155' : '#1E293B';
+      ctx.strokeStyle = '#020617';
+      ctx.lineWidth = 3;
+      ctx.beginPath();
+      ctx.roundRect(-28, -32, 56, 56, 18);
+      ctx.fill();
+      ctx.stroke();
 
-    const riftGrad = ctx.createRadialGradient(0, -2, 4, 0, -2, 24 + pulse);
-    riftGrad.addColorStop(0, '#FEF08A');
-    riftGrad.addColorStop(0.55, '#FF2E4C');
-    riftGrad.addColorStop(1, '#7F1D1D');
-    ctx.fillStyle = riftGrad;
-    ctx.beginPath();
-    ctx.ellipse(0, -1, 18, 22, 0, 0, Math.PI * 2);
-    ctx.fill();
-    ctx.strokeStyle = '#450A0A';
-    ctx.lineWidth = 2.5;
-    ctx.stroke();
+      if (isOpen) {
+        const riftGrad = ctx.createRadialGradient(0, -2, 4, 0, -2, 24 + pulse);
+        riftGrad.addColorStop(0, '#FEF08A');
+        riftGrad.addColorStop(0.55, branch.color);
+        riftGrad.addColorStop(1, '#450A0A');
+        ctx.fillStyle = riftGrad;
+        ctx.beginPath();
+        ctx.ellipse(0, -1, 18, 22, 0, 0, Math.PI * 2);
+        ctx.fill();
+        ctx.strokeStyle = '#450A0A';
+        ctx.lineWidth = 2.5;
+        ctx.stroke();
+      } else {
+        // Sealed Gate waiting for higher Route Level
+        ctx.fillStyle = '#0B1120';
+        ctx.beginPath();
+        ctx.ellipse(0, -1, 18, 22, 0, 0, Math.PI * 2);
+        ctx.fill();
+        ctx.strokeStyle = branch.color;
+        ctx.lineWidth = 2.4;
+        ctx.setLineDash([4, 4]);
+        ctx.stroke();
+        ctx.setLineDash([]);
 
-    ctx.font = '800 11px "Plus Jakarta Sans", sans-serif';
-    ctx.textAlign = 'center';
-    ctx.lineWidth = 3.5;
-    ctx.strokeStyle = '#020617';
-    ctx.strokeText('HORDA', 0, -40);
-    ctx.fillStyle = '#FCA5A5';
-    ctx.fillText('HORDA', 0, -40);
+        // Padlock glyph inside sealed gate
+        ctx.strokeStyle = '#94A3B8';
+        ctx.lineWidth = 2.4;
+        ctx.beginPath();
+        ctx.arc(0, -5, 5.5, Math.PI, 0);
+        ctx.stroke();
+        ctx.fillStyle = '#FACC15';
+        ctx.fillRect(-7, -4, 14, 11);
+      }
 
-    ctx.restore();
+      ctx.font = '800 10.5px "Plus Jakarta Sans", sans-serif';
+      ctx.textAlign = 'center';
+      ctx.lineWidth = 3.5;
+      ctx.strokeStyle = '#020617';
+      const label = !isOpen
+        ? `PORTÃO ${branch.gateIndex} · Nv.${branch.unlockRouteLevel}`
+        : totalRoutes > 1
+          ? `PORTÃO ${branch.gateIndex}`
+          : 'HORDA';
+      ctx.strokeText(label, 0, -40);
+      ctx.fillStyle = isOpen ? (branch.gateIndex === 1 ? '#FCA5A5' : '#FEF08A') : '#94A3B8';
+      ctx.fillText(label, 0, -40);
+
+      ctx.restore();
+    }
   }
 
   private drawCastleBase(ctx: CanvasRenderingContext2D, sim: GameSimulation) {
@@ -1337,7 +1457,7 @@ export class ArenaRenderer {
       ctx.stroke();
       ctx.restore();
 
-      ctx.fillStyle = flash ? '#FFFFFF' : '#4ADE80';
+      ctx.fillStyle = flash ? '#FFFFFF' : '#10B981';
       ctx.strokeStyle = '#020617';
       ctx.lineWidth = 2.5;
       ctx.beginPath();
@@ -1367,7 +1487,7 @@ export class ArenaRenderer {
       const swing = attackAnim * 1.15;
       ctx.save();
       ctx.rotate(facingAngle - 0.5 + swing);
-      ctx.fillStyle = level >= 2 ? '#FACC15' : '#34D399';
+      ctx.fillStyle = level >= 2 ? '#FACC15' : '#A3E635';
       ctx.strokeStyle = '#020617';
       ctx.lineWidth = 2;
       ctx.beginPath();
@@ -1379,6 +1499,217 @@ export class ArenaRenderer {
       ctx.closePath();
       ctx.fill();
       ctx.stroke();
+      ctx.restore();
+    } else if (kind === 'swordsman_ally') {
+      ctx.save();
+      if (!faceRight) ctx.scale(-1, 1);
+      ctx.fillStyle = flash ? '#FFFFFF' : '#991B1B';
+      ctx.strokeStyle = '#020617';
+      ctx.lineWidth = 2.4;
+      ctx.beginPath();
+      ctx.roundRect(-12, -6, 24, 21, 6);
+      ctx.fill();
+      ctx.stroke();
+      ctx.fillStyle = flash ? '#FFFFFF' : '#DC2626';
+      ctx.beginPath();
+      ctx.arc(0, -14, 10.5, 0, Math.PI * 2);
+      ctx.fill();
+      ctx.stroke();
+      ctx.fillStyle = '#FACC15';
+      ctx.fillRect(-3, -22, 6, 6);
+      ctx.save();
+      ctx.translate(10, 0);
+      ctx.rotate(-0.5 + attackAnim * 1.3);
+      ctx.fillStyle = '#F8FAFC';
+      ctx.beginPath();
+      ctx.roundRect(-2.5, -28, 5, 28, 2);
+      ctx.fill();
+      ctx.stroke();
+      ctx.restore();
+      ctx.restore();
+    } else if (kind === 'fire_mage') {
+      ctx.save();
+      if (!faceRight) ctx.scale(-1, 1);
+      ctx.fillStyle = flash ? '#FFFFFF' : '#EA580C';
+      ctx.strokeStyle = '#020617';
+      ctx.lineWidth = 2.4;
+      ctx.beginPath();
+      ctx.moveTo(-13, 14);
+      ctx.lineTo(-8, -8);
+      ctx.lineTo(8, -8);
+      ctx.lineTo(13, 14);
+      ctx.closePath();
+      ctx.fill();
+      ctx.stroke();
+      ctx.fillStyle = '#FED7AA';
+      ctx.beginPath();
+      ctx.arc(0, -13, 9.5, 0, Math.PI * 2);
+      ctx.fill();
+      ctx.stroke();
+      ctx.fillStyle = '#F97316';
+      ctx.beginPath();
+      ctx.moveTo(-12, -16);
+      ctx.lineTo(0, -32);
+      ctx.lineTo(12, -16);
+      ctx.closePath();
+      ctx.fill();
+      ctx.stroke();
+      ctx.fillStyle = '#FACC15';
+      ctx.beginPath();
+      ctx.arc(13, -6 - attackAnim * 4, 5, 0, Math.PI * 2);
+      ctx.fill();
+      ctx.restore();
+    } else if (kind === 'cleric') {
+      ctx.save();
+      ctx.fillStyle = flash ? '#FFFFFF' : '#FEF3C7';
+      ctx.strokeStyle = '#020617';
+      ctx.lineWidth = 2.4;
+      ctx.beginPath();
+      ctx.roundRect(-11, -7, 22, 22, 7);
+      ctx.fill();
+      ctx.stroke();
+      ctx.fillStyle = '#FACC15';
+      ctx.fillRect(-5, 0, 10, 3);
+      ctx.fillRect(-1.5, -3.5, 3, 10);
+      ctx.fillStyle = '#FDE68A';
+      ctx.beginPath();
+      ctx.arc(0, -14, 10, 0, Math.PI * 2);
+      ctx.fill();
+      ctx.stroke();
+      ctx.strokeStyle = '#FACC15';
+      ctx.lineWidth = 2.5;
+      ctx.beginPath();
+      ctx.ellipse(0, -25, 8, 3, 0, 0, Math.PI * 2);
+      ctx.stroke();
+      ctx.restore();
+    } else if (kind === 'shadow_assassin') {
+      ctx.save();
+      if (!faceRight) ctx.scale(-1, 1);
+      ctx.fillStyle = flash ? '#FFFFFF' : '#581C87';
+      ctx.strokeStyle = '#020617';
+      ctx.lineWidth = 2.4;
+      ctx.beginPath();
+      ctx.moveTo(-14, 14);
+      ctx.lineTo(-9, -8);
+      ctx.lineTo(9, -8);
+      ctx.lineTo(14, 14);
+      ctx.closePath();
+      ctx.fill();
+      ctx.stroke();
+      ctx.fillStyle = '#3B0764';
+      ctx.beginPath();
+      ctx.arc(0, -14, 10.5, 0, Math.PI * 2);
+      ctx.fill();
+      ctx.stroke();
+      ctx.fillStyle = '#E879F9';
+      ctx.beginPath();
+      ctx.arc(4, -14, 2.2, 0, Math.PI * 2);
+      ctx.fill();
+      ctx.strokeStyle = '#C084FC';
+      ctx.lineWidth = 3;
+      ctx.beginPath();
+      ctx.moveTo(8, 2);
+      ctx.lineTo(22 + attackAnim * 6, -8);
+      ctx.stroke();
+      ctx.restore();
+    } else if (kind === 'sniper') {
+      ctx.save();
+      if (!faceRight) ctx.scale(-1, 1);
+      ctx.fillStyle = flash ? '#FFFFFF' : '#0891B2';
+      ctx.strokeStyle = '#020617';
+      ctx.lineWidth = 2.4;
+      ctx.beginPath();
+      ctx.roundRect(-10, -6, 20, 20, 5);
+      ctx.fill();
+      ctx.stroke();
+      ctx.fillStyle = '#E0F2FE';
+      ctx.beginPath();
+      ctx.arc(0, -14, 10, 0, Math.PI * 2);
+      ctx.fill();
+      ctx.stroke();
+      ctx.fillStyle = '#06B6D4';
+      ctx.fillRect(-10, -21, 22, 6);
+      ctx.fillStyle = '#1E293B';
+      ctx.fillRect(6 - attackAnim * 3, -4, 20, 5);
+      ctx.restore();
+    } else if (kind === 'golem') {
+      ctx.save();
+      ctx.fillStyle = flash ? '#FFFFFF' : '#475569';
+      ctx.strokeStyle = '#020617';
+      ctx.lineWidth = 2.8;
+      ctx.beginPath();
+      ctx.roundRect(-16, -10, 32, 26, 7);
+      ctx.fill();
+      ctx.stroke();
+      ctx.fillStyle = '#94A3B8';
+      ctx.beginPath();
+      ctx.roundRect(-11, -22, 22, 15, 5);
+      ctx.fill();
+      ctx.stroke();
+      ctx.fillStyle = '#00D4FF';
+      ctx.beginPath();
+      ctx.arc(-4, -15, 2.3, 0, Math.PI * 2);
+      ctx.arc(4, -15, 2.3, 0, Math.PI * 2);
+      ctx.fill();
+      ctx.restore();
+    } else if (kind === 'spore_witch') {
+      ctx.save();
+      ctx.fillStyle = flash ? '#FFFFFF' : '#4D7C0F';
+      ctx.strokeStyle = '#020617';
+      ctx.lineWidth = 2.4;
+      ctx.beginPath();
+      ctx.moveTo(-13, 14);
+      ctx.lineTo(-8, -8);
+      ctx.lineTo(8, -8);
+      ctx.lineTo(13, 14);
+      ctx.closePath();
+      ctx.fill();
+      ctx.stroke();
+      ctx.fillStyle = '#D9F99D';
+      ctx.beginPath();
+      ctx.arc(0, -13, 9.5, 0, Math.PI * 2);
+      ctx.fill();
+      ctx.stroke();
+      ctx.fillStyle = '#65A30D';
+      ctx.beginPath();
+      ctx.moveTo(-15, -17);
+      ctx.lineTo(0, -33);
+      ctx.lineTo(15, -17);
+      ctx.closePath();
+      ctx.fill();
+      ctx.stroke();
+      ctx.restore();
+    } else if (kind === 'paladin') {
+      ctx.save();
+      if (!faceRight) ctx.scale(-1, 1);
+      ctx.fillStyle = flash ? '#FFFFFF' : '#CA8A04';
+      ctx.strokeStyle = '#020617';
+      ctx.lineWidth = 2.6;
+      ctx.beginPath();
+      ctx.roundRect(-13, -7, 26, 23, 7);
+      ctx.fill();
+      ctx.stroke();
+      ctx.fillStyle = '#FEF08A';
+      ctx.beginPath();
+      ctx.arc(0, -15, 11, 0, Math.PI * 2);
+      ctx.fill();
+      ctx.stroke();
+      ctx.fillStyle = '#EAB308';
+      ctx.beginPath();
+      ctx.moveTo(-8, -24);
+      ctx.lineTo(-4, -33);
+      ctx.lineTo(0, -27);
+      ctx.lineTo(4, -33);
+      ctx.lineTo(8, -24);
+      ctx.closePath();
+      ctx.fill();
+      ctx.stroke();
+      ctx.save();
+      ctx.translate(11, -1);
+      ctx.rotate(-0.55 + attackAnim * 1.35);
+      ctx.fillStyle = '#FEF08A';
+      ctx.fillRect(-2.5, -28, 5, 28);
+      ctx.restore();
       ctx.restore();
     }
 
@@ -1398,9 +1729,11 @@ export class ArenaRenderer {
 
   private drawEnemy(ctx: CanvasRenderingContext2D, enemy: EnemyEntity) {
     const isBoss = enemy.kind === 'boss';
+    const isTitan = enemy.kind === 'titan';
+    const isReaper = enemy.kind === 'reaper';
     const waddle = enemy.isDead ? 0 : Math.sin(enemy.walkPhase) * (isBoss ? 0.08 : 0.12);
     const bounce = enemy.isDead ? 0 : Math.abs(Math.sin(enemy.walkPhase)) * (isBoss ? 4.2 : 3.2);
-    const koDuration = isBoss ? 0.55 : 0.32;
+    const koDuration = isBoss || isTitan || isReaper ? 0.52 : 0.32;
     const koAlpha = enemy.isDead ? Math.max(0, enemy.koTimer / koDuration) : 1;
     const koTilt = enemy.isDead ? (1 - koAlpha) * 1.1 : 0;
     const flash = enemy.hitFlash > 0;
@@ -1410,7 +1743,13 @@ export class ArenaRenderer {
     ctx.globalAlpha = koAlpha;
     ctx.translate(enemy.x, enemy.y);
 
-    ctx.fillStyle = isBoss ? 'rgba(255, 46, 76, 0.38)' : 'rgba(2, 6, 23, 0.45)';
+    ctx.fillStyle = isBoss
+      ? 'rgba(255, 46, 76, 0.38)'
+      : isTitan
+        ? 'rgba(168, 85, 247, 0.35)'
+        : isReaper
+          ? 'rgba(250, 204, 21, 0.3)'
+          : 'rgba(2, 6, 23, 0.45)';
     ctx.beginPath();
     ctx.ellipse(0, enemy.radius - 2, enemy.radius * 0.9, isBoss ? 11 : 6.5, 0, 0, Math.PI * 2);
     ctx.fill();
@@ -1423,6 +1762,14 @@ export class ArenaRenderer {
       ctx.stroke();
     }
 
+    if (isTitan && !enemy.isDead && enemy.bracingTimer > 0) {
+      ctx.strokeStyle = '#00D4FF';
+      ctx.lineWidth = 3;
+      ctx.beginPath();
+      ctx.arc(0, -4, enemy.radius + 7, 0, Math.PI * 2);
+      ctx.stroke();
+    }
+
     if (enemy.kind === 'brute' && enemy.lungeTimer > 0.32) {
       ctx.strokeStyle = '#FF2E4C';
       ctx.lineWidth = 3;
@@ -1431,11 +1778,40 @@ export class ArenaRenderer {
       ctx.stroke();
     }
 
+    if (enemy.kind === 'stalker' && enemy.lungeTimer > 0) {
+      ctx.strokeStyle = '#E879F9';
+      ctx.lineWidth = 2.5;
+      ctx.beginPath();
+      ctx.arc(-6, 0, enemy.radius + 5, 0, Math.PI * 2);
+      ctx.stroke();
+    }
+
     ctx.translate(0, -bounce - biteOffset);
     ctx.rotate(waddle + koTilt);
 
+    const cPrimary = enemy.primaryColor;
+    const cSecondary = enemy.secondaryColor;
+    const cAccent = enemy.accentColor;
+
+    if ((enemy.slowTimer ?? 0) > 0 && !enemy.isDead) {
+      ctx.strokeStyle = '#84CC16';
+      ctx.lineWidth = 2;
+      ctx.beginPath();
+      ctx.ellipse(0, enemy.radius - 2, enemy.radius + 5, 7, 0, 0, Math.PI * 2);
+      ctx.stroke();
+    }
+    if ((enemy.corrosionTimer ?? 0) > 0 && !enemy.isDead) {
+      ctx.strokeStyle = '#10B981';
+      ctx.lineWidth = 2;
+      ctx.setLineDash([4, 4]);
+      ctx.beginPath();
+      ctx.arc(0, -4, enemy.radius + 4, 0, Math.PI * 2);
+      ctx.stroke();
+      ctx.setLineDash([]);
+    }
+
     if (enemy.kind === 'walker') {
-      ctx.fillStyle = flash ? '#FFFFFF' : '#E2E8F0';
+      ctx.fillStyle = flash ? '#FFFFFF' : cSecondary ?? '#E2E8F0';
       ctx.strokeStyle = '#020617';
       ctx.lineWidth = 2.4;
       ctx.beginPath();
@@ -1443,15 +1819,142 @@ export class ArenaRenderer {
       ctx.fill();
       ctx.stroke();
 
-      ctx.fillStyle = flash ? '#FFFFFF' : '#38BDF8';
+      ctx.fillStyle = flash ? '#FFFFFF' : cPrimary ?? '#38BDF8';
       ctx.beginPath();
       ctx.arc(0, -12, 10.5, 0, Math.PI * 2);
       ctx.fill();
       ctx.stroke();
       this.drawZombieFace(ctx, 0, -12);
+    } else if (enemy.kind === 'stalker') {
+      ctx.fillStyle = flash ? '#FFFFFF' : cSecondary ?? '#4C1D95';
+      ctx.strokeStyle = '#020617';
+      ctx.lineWidth = 2.4;
+      ctx.beginPath();
+      ctx.moveTo(-13, 12);
+      ctx.lineTo(-8, -8);
+      ctx.lineTo(8, -8);
+      ctx.lineTo(13, 12);
+      ctx.closePath();
+      ctx.fill();
+      ctx.stroke();
+
+      ctx.fillStyle = flash ? '#FFFFFF' : cPrimary ?? '#C026D3';
+      ctx.beginPath();
+      ctx.arc(0, -13, 10, 0, Math.PI * 2);
+      ctx.fill();
+      ctx.stroke();
+
+      ctx.fillStyle = cAccent ?? '#FACC15';
+      ctx.beginPath();
+      ctx.moveTo(-8, -18);
+      ctx.lineTo(-14, -27);
+      ctx.lineTo(-3, -21);
+      ctx.closePath();
+      ctx.moveTo(8, -18);
+      ctx.lineTo(14, -27);
+      ctx.lineTo(3, -21);
+      ctx.closePath();
+      ctx.fill();
+
+      ctx.fillStyle = cAccent ?? '#00D4FF';
+      ctx.beginPath();
+      ctx.arc(-3.5, -13, 2.3, 0, Math.PI * 2);
+      ctx.arc(3.5, -13, 2.3, 0, Math.PI * 2);
+      ctx.fill();
+    } else if (enemy.kind === 'pyro') {
+      ctx.fillStyle = flash ? '#FFFFFF' : cSecondary ?? '#EA580C';
+      ctx.strokeStyle = '#020617';
+      ctx.lineWidth = 2.4;
+      ctx.beginPath();
+      ctx.roundRect(-11, -5, 22, 20, 6);
+      ctx.fill();
+      ctx.stroke();
+
+      ctx.fillStyle = cAccent ?? '#FACC15';
+      ctx.beginPath();
+      ctx.moveTo(-10, -14);
+      ctx.lineTo(-5, -28);
+      ctx.lineTo(0, -18);
+      ctx.lineTo(4, -30);
+      ctx.lineTo(10, -14);
+      ctx.closePath();
+      ctx.fill();
+
+      ctx.fillStyle = flash ? '#FFFFFF' : cPrimary ?? '#FF2E4C';
+      ctx.beginPath();
+      ctx.arc(0, -13, 10.5, 0, Math.PI * 2);
+      ctx.fill();
+      ctx.stroke();
+      this.drawZombieFace(ctx, 0, -13);
+    } else if (enemy.kind === 'reaper') {
+      ctx.fillStyle = flash ? '#FFFFFF' : cSecondary ?? '#1E1B4B';
+      ctx.strokeStyle = '#020617';
+      ctx.lineWidth = 2.8;
+      ctx.beginPath();
+      ctx.moveTo(-17, 16);
+      ctx.lineTo(-12, -10);
+      ctx.lineTo(12, -10);
+      ctx.lineTo(17, 16);
+      ctx.closePath();
+      ctx.fill();
+      ctx.stroke();
+
+      ctx.fillStyle = flash ? '#FFFFFF' : cPrimary ?? '#991B1B';
+      ctx.beginPath();
+      ctx.arc(0, -18, 13, 0, Math.PI * 2);
+      ctx.fill();
+      ctx.stroke();
+
+      ctx.fillStyle = cAccent ?? '#FACC15';
+      ctx.beginPath();
+      ctx.arc(-4.5, -18, 2.5, 0, Math.PI * 2);
+      ctx.arc(4.5, -18, 2.5, 0, Math.PI * 2);
+      ctx.fill();
+
+      ctx.strokeStyle = cAccent ?? '#FACC15';
+      ctx.lineWidth = 3.2;
+      ctx.beginPath();
+      ctx.moveTo(14, 14);
+      ctx.lineTo(18, -26);
+      ctx.stroke();
+      ctx.fillStyle = '#FF2E4C';
+      ctx.beginPath();
+      ctx.moveTo(18, -26);
+      ctx.quadraticCurveTo(34, -22, 30, -8);
+      ctx.quadraticCurveTo(25, -18, 18, -19);
+      ctx.closePath();
+      ctx.fill();
+    } else if (enemy.kind === 'titan') {
+      ctx.fillStyle = flash ? '#FFFFFF' : cSecondary ?? '#312E81';
+      ctx.strokeStyle = '#020617';
+      ctx.lineWidth = 3;
+      ctx.beginPath();
+      ctx.roundRect(-20, -10, 40, 32, 8);
+      ctx.fill();
+      ctx.stroke();
+
+      if (!flash) {
+        ctx.fillStyle = cPrimary ?? '#A855F7';
+        ctx.beginPath();
+        ctx.roundRect(-24, -12, 11, 14, 4);
+        ctx.roundRect(13, -12, 11, 14, 4);
+        ctx.fill();
+        ctx.stroke();
+      }
+
+      ctx.fillStyle = flash ? '#FFFFFF' : cPrimary ?? '#7C3AED';
+      ctx.beginPath();
+      ctx.arc(0, -20, 15, 0, Math.PI * 2);
+      ctx.fill();
+      ctx.stroke();
+      this.drawZombieFace(ctx, 0, -20);
+
+      ctx.fillStyle = cAccent ?? '#00D4FF';
+      ctx.beginPath();
+      ctx.arc(0, 5, 5.5, 0, Math.PI * 2);
+      ctx.fill();
     } else if (enemy.kind === 'shielded') {
-      // Special Shielded Enemy: Electric Blue + Gold trim popping on dark road
-      ctx.fillStyle = flash ? '#FFFFFF' : '#1E40AF';
+      ctx.fillStyle = flash ? '#FFFFFF' : cSecondary ?? '#1E40AF';
       ctx.strokeStyle = '#020617';
       ctx.lineWidth = 2.5;
       ctx.beginPath();
@@ -1459,7 +1962,7 @@ export class ArenaRenderer {
       ctx.fill();
       ctx.stroke();
 
-      ctx.fillStyle = flash ? '#FFFFFF' : '#00D4FF';
+      ctx.fillStyle = flash ? '#FFFFFF' : cPrimary ?? '#00D4FF';
       ctx.beginPath();
       ctx.arc(0, -14, 11, 0, Math.PI * 2);
       ctx.fill();
@@ -1467,19 +1970,18 @@ export class ArenaRenderer {
       this.drawZombieFace(ctx, 0, -14);
 
       const shieldRaise = enemy.bracingTimer > 0 ? -4 : 0;
-      ctx.fillStyle = flash ? '#FFFFFF' : '#2563EB';
+      ctx.fillStyle = flash ? '#FFFFFF' : cPrimary ?? '#2563EB';
       ctx.beginPath();
       ctx.roundRect(-14, -8 + shieldRaise, 16, 22, 4);
       ctx.fill();
       ctx.stroke();
 
       if (!flash) {
-        ctx.fillStyle = '#FACC15';
+        ctx.fillStyle = cAccent ?? '#FACC15';
         ctx.fillRect(-10, 0 + shieldRaise, 8, 5);
       }
     } else if (enemy.kind === 'boss') {
-      // Special Boss: Vivid Crimson & Gold Crown
-      ctx.fillStyle = flash ? '#FFFFFF' : '#991B1B';
+      ctx.fillStyle = flash ? '#FFFFFF' : cSecondary ?? '#991B1B';
       ctx.strokeStyle = '#020617';
       ctx.lineWidth = 3.2;
       ctx.beginPath();
@@ -1488,7 +1990,7 @@ export class ArenaRenderer {
       ctx.stroke();
 
       if (!flash) {
-        ctx.fillStyle = '#FF2E4C';
+        ctx.fillStyle = cPrimary ?? '#FF2E4C';
         ctx.beginPath();
         ctx.roundRect(-28, -14, 14, 16, 5);
         ctx.roundRect(14, -14, 14, 16, 5);
@@ -1496,14 +1998,14 @@ export class ArenaRenderer {
         ctx.stroke();
       }
 
-      ctx.fillStyle = flash ? '#FFFFFF' : '#EF4444';
+      ctx.fillStyle = flash ? '#FFFFFF' : cPrimary ?? '#EF4444';
       ctx.beginPath();
       ctx.arc(0, -24, 19, 0, Math.PI * 2);
       ctx.fill();
       ctx.stroke();
       this.drawZombieFace(ctx, 0, -24);
 
-      ctx.fillStyle = flash ? '#FFFFFF' : '#FACC15';
+      ctx.fillStyle = flash ? '#FFFFFF' : cAccent ?? '#FACC15';
       ctx.strokeStyle = '#422006';
       ctx.lineWidth = 2.5;
       ctx.beginPath();
@@ -1518,8 +2020,7 @@ export class ArenaRenderer {
       ctx.fill();
       ctx.stroke();
     } else {
-      // Brute Special: Hot Crimson Armor
-      ctx.fillStyle = flash ? '#FFFFFF' : '#B91C1C';
+      ctx.fillStyle = flash ? '#FFFFFF' : cSecondary ?? '#B91C1C';
       ctx.strokeStyle = '#020617';
       ctx.lineWidth = 2.6;
       ctx.beginPath();
@@ -1527,7 +2028,7 @@ export class ArenaRenderer {
       ctx.fill();
       ctx.stroke();
 
-      ctx.fillStyle = flash ? '#FFFFFF' : '#FF2E4C';
+      ctx.fillStyle = flash ? '#FFFFFF' : cPrimary ?? '#FF2E4C';
       ctx.beginPath();
       ctx.arc(0, -15, 12.5, 0, Math.PI * 2);
       ctx.fill();
@@ -1542,7 +2043,7 @@ export class ArenaRenderer {
       const yPos = enemy.y - enemy.radius - (isBoss ? 30 : 13) - bounce;
 
       if (isBoss) {
-        const barW = 66;
+        const barW = 72;
         const barH = 7;
         const ratio = Math.max(0, enemy.hp / enemy.maxHp);
         ctx.fillStyle = '#020617';
@@ -1559,9 +2060,10 @@ export class ArenaRenderer {
         ctx.textBaseline = 'bottom';
         ctx.lineWidth = 3.5;
         ctx.strokeStyle = '#020617';
-        ctx.strokeText(`CHEFE · ${enemy.hp}`, enemy.x, yPos - 5);
+        const bossLabel = `${enemy.displayName ?? 'CHEFE'} · ${enemy.hp}`;
+        ctx.strokeText(bossLabel, enemy.x, yPos - 5);
         ctx.fillStyle = '#FACC15';
-        ctx.fillText(`CHEFE · ${enemy.hp}`, enemy.x, yPos - 5);
+        ctx.fillText(bossLabel, enemy.x, yPos - 5);
       } else {
         ctx.font = '800 14px "Fredoka", "Plus Jakarta Sans", sans-serif';
         ctx.textAlign = 'center';

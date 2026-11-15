@@ -97,7 +97,10 @@ export const GameCanvas: React.FC<GameCanvasProps> = ({
       const snap = sim.getHudSnapshot();
       const cdKey = `${Math.ceil(snap.spellCooldowns.blade * 2)}|${Math.ceil(snap.spellCooldowns.shockwave * 2)}|${Math.ceil(snap.spellCooldowns.overcharge * 2)}|${snap.targetingSpell ?? ''}|${Math.ceil(snap.overchargeTimer * 2)}`;
       const bannerId = snap.activeBanner ? snap.activeBanner.id : 0;
-      const hudKey = `${snap.phase}|${snap.stage}|${snap.highestUnlockedStage}|${snap.baseHp}|${snap.baseLevel}|${snap.essence}|${snap.score}|${snap.wave}|${snap.kills}|${snap.selectedHeroClass}|${snap.heroLevel}|${snap.heroXp}|${snap.heroKills}|${snap.heroRepositionMode}|${snap.selectedUnit}|${snap.unitCount}|${snap.mergesPerformed}|${snap.maxUnitLevelReached}|${snap.comboCount}|${bannerId}|${snap.mutedMusic}|${snap.mutedSfx}|${snap.bossActive}|${cdKey}`;
+      const heroesKey = snap.activeHeroes
+        .map((h) => `${h.heroClass}:${h.level}:${h.xp}:${Math.round(h.x)},${Math.round(h.y)}`)
+        .join(';');
+      const hudKey = `${snap.phase}|${snap.stage}|${snap.highestUnlockedStage}|${snap.isConvergenceStage}|${snap.routeLevel}|${snap.maxRouteLevel}|${snap.openGatesCount}|${snap.baseHp}|${snap.baseMaxHp}|${snap.baseLevel}|${snap.essence}|${snap.evolutionPoints}|${snap.score}|${snap.wave}|${snap.kills}|${snap.selectedHeroClass}|${snap.activeHeroIndex}|${heroesKey}|${snap.heroRepositionMode}|${snap.selectedUnit}|${snap.unitCount}|${snap.mergesPerformed}|${snap.maxUnitLevelReached}|${snap.comboCount}|${bannerId}|${snap.pendingUpgradeMilestoneLevel ?? 0}|${snap.pendingUpgradeHeroClass ?? ''}|${snap.heroUpgradesCount}|${snap.mutedMusic}|${snap.mutedSfx}|${snap.bossActive}|${cdKey}`;
       if (hudKey !== lastHudKey) {
         lastHudKey = hudKey;
         onHudSyncRef.current(snap);

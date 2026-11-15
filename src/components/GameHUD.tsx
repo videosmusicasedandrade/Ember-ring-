@@ -1,6 +1,7 @@
 import React, { useEffect, useState } from 'react';
-import { Move, Music, Pause, Plus, RotateCcw, Shield, Volume2, VolumeX } from 'lucide-react';
+import { Move, Music, Pause, Plus, RotateCcw, Shield, Sparkles, Volume2, VolumeX } from 'lucide-react';
 import { soundEngine } from '../game/audio';
+import { ALLY_ALBUM, getUnlockedAlliesForStage } from '../game/bestiaryData';
 import {
   HERO_SPECS,
   HudSnapshot,
@@ -10,6 +11,7 @@ import {
   UNIT_SPECS,
   UnitKind,
 } from '../game/types';
+import { AllyPortraitSvg } from './AlbumArtwork';
 import { HeroClassIcon } from './GameModals';
 
 interface GameHUDProps {
@@ -18,6 +20,7 @@ interface GameHUDProps {
   onQuickRecruit: (kind: UnitKind) => void;
   onStartCardDrag: (kind: UnitKind, clientX: number, clientY: number) => void;
   onToggleHeroReposition: () => void;
+  onSelectActiveHero: (index: number) => void;
   onActivateSpell: (kind: SpellKind) => void;
   onTogglePause: () => void;
   onToggleMuteMusic: () => void;
@@ -25,33 +28,17 @@ interface GameHUDProps {
   onRestart: () => void;
 }
 
-const UNIT_ORDER: UnitKind[] = ['scout', 'shield', 'frog'];
 const SPELL_ORDER: SpellKind[] = ['blade', 'shockwave', 'overcharge'];
 
 function UnitIcon({ kind }: { kind: UnitKind }) {
-  if (kind === 'scout') {
-    return (
-      <svg viewBox="0 0 24 24" className="h-7 w-7 shrink-0" aria-hidden="true">
-        <circle cx="12" cy="13" r="7" fill="#FED7AA" stroke="#020617" strokeWidth="2" />
-        <path d="M5 11a7 7 0 0 1 14 0z" fill="#00D4FF" stroke="#020617" strokeWidth="2" />
-        <rect x="10" y="9" width="10" height="3.5" rx="1.5" fill="#FFFFFF" stroke="#020617" strokeWidth="1.5" />
-      </svg>
-    );
-  }
-  if (kind === 'shield') {
-    return (
-      <svg viewBox="0 0 24 24" className="h-7 w-7 shrink-0" aria-hidden="true">
-        <rect x="5" y="4" width="14" height="16" rx="5" fill="#2563EB" stroke="#020617" strokeWidth="2" />
-        <circle cx="12" cy="12" r="3.5" fill="#FACC15" />
-      </svg>
-    );
+  const ally = ALLY_ALBUM.find((a) => a.unitKind === kind);
+  if (ally) {
+    return <AllyPortraitSvg ally={ally} unlocked={true} className="h-8 w-8 rounded-lg" />;
   }
   return (
     <svg viewBox="0 0 24 24" className="h-7 w-7 shrink-0" aria-hidden="true">
-      <ellipse cx="12" cy="14" rx="7.5" ry="6" fill="#4ADE80" stroke="#020617" strokeWidth="2" />
-      <circle cx="7.5" cy="7.5" r="3" fill="#FF2E4C" stroke="#020617" strokeWidth="1.5" />
-      <circle cx="16.5" cy="7.5" r="3" fill="#FF2E4C" stroke="#020617" strokeWidth="1.5" />
-      <path d="M17 17l5-5" stroke="#FACC15" strokeWidth="3" strokeLinecap="round" />
+      <rect x="5" y="4" width="14" height="16" rx="5" fill="#2563EB" stroke="#020617" strokeWidth="2" />
+      <circle cx="12" cy="12" r="3.5" fill="#FACC15" />
     </svg>
   );
 }
@@ -88,6 +75,7 @@ export const GameHUD: React.FC<GameHUDProps> = ({
   onQuickRecruit,
   onStartCardDrag,
   onToggleHeroReposition,
+  onSelectActiveHero,
   onActivateSpell,
   onTogglePause,
   onToggleMuteMusic,
@@ -115,12 +103,15 @@ export const GameHUD: React.FC<GameHUDProps> = ({
         ? 'from-[#F59E0B] to-[#FACC15]'
         : 'from-[#DC2626] to-[#FF2E4C]';
 
-  const heroSpec = HERO_SPECS[hud.selectedHeroClass];
+  const activeHero = hud.activeHeroes[hud.activeHeroIndex] ?? hud.activeHeroes[0];
+  const activeHeroClass = activeHero?.heroClass ?? hud.selectedHeroClass;
+  const heroSpec = HERO_SPECS[activeHeroClass];
   const isHeroMax = hud.heroLevel >= MAX_HERO_LEVEL;
   const xpSpan = Math.max(1, hud.heroNextLevelXp - hud.heroCurrentLevelXp);
   const xpPercent = isHeroMax
     ? 100
     : Math.max(0, Math.min(100, ((hud.heroXp - hud.heroCurrentLevelXp) / xpSpan) * 100));
+  const isTrio = hud.activeHeroes.length > 1;
 
   const bannerToneClass =
     hud.activeBanner?.tone === 'crimson'
@@ -131,14 +122,14 @@ export const GameHUD: React.FC<GameHUDProps> = ({
 
   return (
     <div className="pointer-events-none fixed inset-0 z-20 flex flex-col justify-between p-2.5 sm:p-4">
-      {/* Top Unified HUD: Castle HP + Hero XP Bar + Economy/Wave + Controls */}
-      <div className="flex flex-col gap-2 sm:flex-row sm:items-center sm:justify-between">
-        {/* Top-Left: Castle HP & Hero XP Bars */}
-        <div className="pointer-events-auto flex flex-col gap-1.5 sm:flex-row sm:items-center sm:gap-2.5">
+      {/* Top Unified HUD: Castle HP + Hero XP Bar(s) + Economy/Wave/Routes + Controls */}
+      <div className="flex flex-col gap-2 sm:flex-row sm:items-start sm:justify-between">
+        {/* Top-Left: Castle HP & Persistent Hero XP Bar(s) */}
+        <div className="pointer-events-auto flex flex-col gap-1.5 sm:flex-row sm:items-center sm:gap-2">
           {/* Castle HP Bar */}
           <div
             aria-label="Vida do Castelo"
-            className="flex items-center gap-2.5 rounded-2xl border-2 border-[#334155] bg-[#0F172A]/95 px-3 py-1.5 shadow-[0_4px_0_rgba(2,6,23,0.75)] sm:min-w-[225px]"
+            className="flex items-center gap-2 rounded-2xl border-2 border-[#334155] bg-[#0F172A]/95 px-2.5 py-1.5 shadow-[0_4px_0_rgba(2,6,23,0.75)] sm:min-w-[195px]"
           >
             <div className="flex h-8 w-8 shrink-0 items-center justify-center rounded-xl border border-[#334155] bg-[#1E293B] text-[#FACC15]">
               <Shield className="h-4.5 w-4.5" />
@@ -155,7 +146,7 @@ export const GameHUD: React.FC<GameHUDProps> = ({
                   {Math.round(hud.baseHp)}/{hud.baseMaxHp}
                 </span>
               </div>
-              <div className="relative h-3 w-full overflow-hidden rounded-full border border-[#020617] bg-[#080D1A]">
+              <div className="relative h-2.5 w-full overflow-hidden rounded-full border border-[#020617] bg-[#080D1A]">
                 <div
                   className="absolute inset-0 origin-left bg-[#FF2E4C]/70 transition-transform duration-300"
                   style={{ transform: `scaleX(${ghostPercent / 100})` }}
@@ -168,67 +159,137 @@ export const GameHUD: React.FC<GameHUDProps> = ({
             </div>
           </div>
 
-          {/* Visible Real-Time Hero XP & Evolution Bar + Reposition Action */}
-          <div
-            aria-label="Experiência do Herói"
-            className="flex items-center gap-2 rounded-2xl border-2 border-[#334155] bg-[#0F172A]/95 px-3 py-1.5 shadow-[0_4px_0_rgba(2,6,23,0.75)] sm:min-w-[260px]"
-          >
-            <div className="flex h-8 w-8 shrink-0 items-center justify-center rounded-xl border border-[#334155] bg-[#080D1A]">
-              <HeroClassIcon heroClass={hud.selectedHeroClass} className="h-6 w-6" />
-            </div>
-            <div className="min-w-0 flex-1">
-              <div className="mb-1 flex items-center justify-between gap-2 text-xs font-bold leading-none">
-                <span className="flex items-center gap-1 whitespace-nowrap text-white">
-                  <span>{heroSpec.name}</span>
-                  <span className="font-mono-tabular text-[11px] text-[#00D4FF]" data-testid="hud-hero-level">
-                    {isHeroMax ? 'MÁX' : `Nv.${hud.heroLevel}`}
-                  </span>
-                </span>
-                <span className="font-mono-tabular whitespace-nowrap text-[11px] text-[#FACC15]" data-testid="hud-hero-xp">
-                  {isHeroMax ? `${hud.heroXp} XP` : `${hud.heroXp}/${hud.heroNextLevelXp} XP`}
-                </span>
-              </div>
-              <div className="relative h-3 w-full overflow-hidden rounded-full border border-[#020617] bg-[#080D1A]">
-                <div
-                  className="h-full w-full origin-left rounded-full bg-gradient-to-r from-[#00D4FF] to-[#FACC15] transition-transform duration-200"
-                  style={{ transform: `scaleX(${xpPercent / 100})` }}
-                />
-              </div>
-            </div>
-            <button
-              type="button"
-              tabIndex={-1}
-              data-testid="btn-move-hero"
-              aria-label="Reposicionar Herói no mapa"
-              title="Reposicionar Herói no mapa"
-              onClick={(e) => {
-                e.currentTarget.blur();
-                soundEngine.playClick();
-                onToggleHeroReposition();
-              }}
-              className={`flex h-8 shrink-0 items-center gap-1 rounded-lg border px-2 text-[11px] font-bold whitespace-nowrap transition-colors ${
-                hud.heroRepositionMode
-                  ? 'border-[#FACC15] bg-[#00D4FF] text-[#020617]'
-                  : 'border-[#334155] bg-[#1E293B] text-[#E2E8F0] hover:border-[#00D4FF]'
-              }`}
+          {/* Persistent Hero(es) Bar */}
+          {isTrio ? (
+            <div
+              aria-label="Trio de Heróis"
+              data-testid="hud-trio-bar"
+              className="flex items-center gap-1.5 rounded-2xl border-2 border-[#FACC15]/70 bg-[#0F172A]/95 px-2 py-1 shadow-[0_4px_0_rgba(2,6,23,0.75)]"
             >
-              <Move className="h-3.5 w-3.5" />
-              <span>{hud.heroRepositionMode ? 'Escolha Slot' : 'Mover'}</span>
-            </button>
-          </div>
+              {hud.activeHeroes.map((h, idx) => {
+                const spec = HERO_SPECS[h.heroClass];
+                const selected = idx === hud.activeHeroIndex;
+                const span = Math.max(1, h.nextLevelXp - h.currentLevelXp);
+                const pct =
+                  h.level >= MAX_HERO_LEVEL
+                    ? 100
+                    : Math.max(0, Math.min(100, ((h.xp - h.currentLevelXp) / span) * 100));
+                return (
+                  <button
+                    key={h.heroClass}
+                    type="button"
+                    tabIndex={-1}
+                    data-testid={`trio-hero-${h.heroClass}`}
+                    onClick={(e) => {
+                      e.currentTarget.blur();
+                      soundEngine.playClick();
+                      onSelectActiveHero(idx);
+                    }}
+                    className={`flex items-center gap-1.5 rounded-xl border px-2 py-1 text-left transition-colors ${
+                      selected
+                        ? 'border-[#00D4FF] bg-[#082F49]'
+                        : 'border-[#334155] bg-[#080D1A]/85 hover:border-[#FACC15]/70'
+                    }`}
+                    title={`Selecionar/Mover ${spec.name} (Nv.${h.level}) livremente`}
+                  >
+                    <HeroClassIcon heroClass={h.heroClass} className="h-5 w-5" />
+                    <div className="w-16 leading-none">
+                      <div className="flex items-center justify-between gap-1 text-[10px] font-bold text-white">
+                        <span>{spec.name.slice(0, 3)}</span>
+                        <span className="font-mono-tabular text-[#00D4FF]">Nv.{h.level}</span>
+                      </div>
+                      <div className="mt-1 h-1.5 w-full overflow-hidden rounded-full bg-[#020617]">
+                        <div
+                          className="h-full origin-left rounded-full bg-gradient-to-r from-[#00D4FF] to-[#FACC15]"
+                          style={{ transform: `scaleX(${pct / 100})` }}
+                        />
+                      </div>
+                    </div>
+                  </button>
+                );
+              })}
+              <button
+                type="button"
+                tabIndex={-1}
+                data-testid="btn-move-hero"
+                aria-label="Mover Herói livremente"
+                onClick={(e) => {
+                  e.currentTarget.blur();
+                  soundEngine.playClick();
+                  onToggleHeroReposition();
+                }}
+                className={`flex h-8 shrink-0 items-center gap-1 rounded-lg border px-2 text-[11px] font-bold whitespace-nowrap transition-colors ${
+                  hud.heroRepositionMode
+                    ? 'border-[#FACC15] bg-[#00D4FF] text-[#020617]'
+                    : 'border-[#334155] bg-[#1E293B] text-[#E2E8F0] hover:border-[#00D4FF]'
+                }`}
+              >
+                <Move className="h-3.5 w-3.5" />
+                <span>{hud.heroRepositionMode ? 'Pos. Livre' : 'Mover'}</span>
+              </button>
+            </div>
+          ) : (
+            <div
+              aria-label="Experiência do Herói"
+              className="flex items-center gap-2 rounded-2xl border-2 border-[#334155] bg-[#0F172A]/95 px-2.5 py-1.5 shadow-[0_4px_0_rgba(2,6,23,0.75)] sm:min-w-[245px]"
+            >
+              <div className="flex h-8 w-8 shrink-0 items-center justify-center rounded-xl border border-[#334155] bg-[#080D1A]">
+                <HeroClassIcon heroClass={activeHeroClass} className="h-6 w-6" />
+              </div>
+              <div className="min-w-0 flex-1">
+                <div className="mb-1 flex items-center justify-between gap-2 text-xs font-bold leading-none">
+                  <span className="flex items-center gap-1 whitespace-nowrap text-white">
+                    <span>{heroSpec.name}</span>
+                    <span className="font-mono-tabular text-[11px] text-[#00D4FF]" data-testid="hud-hero-level">
+                      {isHeroMax ? 'MÁX' : `Nv.${hud.heroLevel}`}
+                    </span>
+                  </span>
+                  <span className="font-mono-tabular whitespace-nowrap text-[11px] text-[#FACC15]" data-testid="hud-hero-xp">
+                    {isHeroMax ? `${hud.heroXp} XP` : `${hud.heroXp}/${hud.heroNextLevelXp} XP`}
+                  </span>
+                </div>
+                <div className="relative h-2.5 w-full overflow-hidden rounded-full border border-[#020617] bg-[#080D1A]">
+                  <div
+                    className="h-full w-full origin-left rounded-full bg-gradient-to-r from-[#00D4FF] to-[#FACC15] transition-transform duration-200"
+                    style={{ transform: `scaleX(${xpPercent / 100})` }}
+                  />
+                </div>
+              </div>
+              <button
+                type="button"
+                tabIndex={-1}
+                data-testid="btn-move-hero"
+                aria-label="Reposicionar Herói no mapa"
+                title="Reposicionar Herói livremente ou em slot"
+                onClick={(e) => {
+                  e.currentTarget.blur();
+                  soundEngine.playClick();
+                  onToggleHeroReposition();
+                }}
+                className={`flex h-8 shrink-0 items-center gap-1 rounded-lg border px-2 text-[11px] font-bold whitespace-nowrap transition-colors ${
+                  hud.heroRepositionMode
+                    ? 'border-[#FACC15] bg-[#00D4FF] text-[#020617]'
+                    : 'border-[#334155] bg-[#1E293B] text-[#E2E8F0] hover:border-[#00D4FF]'
+                }`}
+              >
+                <Move className="h-3.5 w-3.5" />
+                <span>{hud.heroRepositionMode ? 'Pos. Livre' : 'Mover'}</span>
+              </button>
+            </div>
+          )}
         </div>
 
-        {/* Center Plaque: Essence · Stage/Wave · Score */}
+        {/* Center Plaque: Essence · Stage/Wave · Routes/Gates · Score */}
         <div
           aria-label="Recursos e progresso"
-          className="pointer-events-auto flex items-center justify-between gap-3 rounded-2xl border-2 border-[#334155] bg-[#0F172A]/95 px-3.5 py-1.5 shadow-[0_4px_0_rgba(2,6,23,0.75)] sm:justify-center sm:gap-4 sm:px-4"
+          className="pointer-events-auto flex items-center justify-between gap-2.5 rounded-2xl border-2 border-[#334155] bg-[#0F172A]/95 px-3 py-1.5 shadow-[0_4px_0_rgba(2,6,23,0.75)] sm:justify-center sm:gap-3.5 sm:px-4"
         >
           <div className="flex items-center gap-1.5">
             <svg viewBox="0 0 24 24" className="h-5 w-5 shrink-0" aria-hidden="true">
               <polygon points="12,2 20,9 16,21 8,21 4,9" fill="#FACC15" stroke="#422006" strokeWidth="2" />
             </svg>
             <div className="leading-none">
-              <div className="text-[10px] font-bold tracking-wider text-[#FACC15] uppercase">
+              <div className="text-[10px] font-bold tracking-wider text-[#FACC15] uppercase whitespace-nowrap">
                 {hud.overchargeTimer > 0 ? 'Essência 1.5x' : 'Essência'}
               </div>
               <div
@@ -243,21 +304,46 @@ export const GameHUD: React.FC<GameHUDProps> = ({
           <div className="h-6 w-px bg-white/15" />
 
           <div className="leading-none text-center">
-            <div className="flex items-center justify-center gap-1 text-[10px] font-bold tracking-wider text-[#00D4FF] uppercase">
+            <div className="flex items-center justify-center gap-1 text-[10px] font-bold tracking-wider text-[#00D4FF] uppercase whitespace-nowrap">
               <span>Fase {hud.stage}</span>
+              {hud.isConvergenceStage && (
+                <span className="rounded bg-[#FACC15] px-1 py-0.5 text-[9px] text-[#020617]">TRIO</span>
+              )}
               {hud.bossActive && (
                 <span className="rounded bg-[#FF2E4C] px-1 py-0.5 text-[9px] text-[#FEF08A]">CHEFE</span>
               )}
             </div>
-            <div className="font-mono-tabular text-base font-bold text-white sm:text-lg" data-testid="hud-wave">
+            <div className="font-mono-tabular text-sm font-bold whitespace-nowrap text-white sm:text-base" data-testid="hud-wave">
               Onda {hud.wave}/{hud.totalWavesInStage}
             </div>
           </div>
 
           <div className="h-6 w-px bg-white/15" />
 
-          <div className="leading-none text-right">
-            <div className="text-[10px] font-bold tracking-wider text-[#94A3B8] uppercase">Pontos</div>
+          <div className="leading-none text-center">
+            <div className="text-[10px] font-bold tracking-wider text-[#CBD5E1] uppercase whitespace-nowrap">
+              Rotas Nv.{hud.routeLevel}
+            </div>
+            <div
+              className="font-mono-tabular text-sm font-bold whitespace-nowrap text-[#FACC15] sm:text-base"
+              data-testid="hud-routes"
+            >
+              {hud.openGatesCount}/{hud.maxRouteLevel} Portões
+            </div>
+          </div>
+
+          <div className="hidden h-6 w-px bg-white/15 sm:block" />
+
+          <div className="hidden leading-none text-right sm:block">
+            <div className="flex items-center justify-end gap-1 text-[10px] font-bold tracking-wider text-[#94A3B8] uppercase whitespace-nowrap">
+              {hud.paladinAuraActive && (
+                <span className="flex items-center gap-0.5 text-[#FACC15]" title="Aura do Paladino: +20% Dano para todas as tropas">
+                  <Sparkles className="h-3 w-3" />
+                  +20%
+                </span>
+              )}
+              <span>Pontos</span>
+            </div>
             <div className="font-mono-tabular text-base font-bold text-white sm:text-lg" data-testid="hud-score">
               {Math.round(hud.score)}
             </div>
@@ -335,21 +421,22 @@ export const GameHUD: React.FC<GameHUDProps> = ({
         </div>
       </div>
 
-      {/* Dynamic Positive Reinforcement Micro-Reward Banner */}
+      {/* Compact Positive Reinforcement Micro-Reward Banner */}
       {hud.activeBanner && (
         <div
           key={hud.activeBanner.id}
+          data-testid="reward-banner"
           aria-live="polite"
-          className="pointer-events-none fixed left-1/2 top-[236px] z-30 w-max max-w-[92vw] -translate-x-1/2 sm:top-[86px]"
+          className="pointer-events-none fixed left-1/2 top-[234px] z-30 w-max max-w-[88vw] -translate-x-1/2 sm:top-[84px]"
         >
           <div
-            className={`animate-reward-pop rounded-2xl border-2 px-4 py-1.5 text-center shadow-[0_6px_24px_rgba(0,0,0,0.65)] sm:px-5 sm:py-2 ${bannerToneClass}`}
+            className={`animate-reward-pop rounded-xl border px-3 py-1 text-center shadow-[0_4px_14px_rgba(0,0,0,0.55)] sm:px-3.5 sm:py-1 ${bannerToneClass}`}
           >
-            <div className="font-display text-lg font-bold tracking-wide sm:text-2xl">
+            <div className="font-display text-xs font-bold tracking-wide sm:text-sm">
               {hud.activeBanner.text}
             </div>
             {hud.activeBanner.subtext && (
-              <div className="text-[11px] font-bold text-white/90 sm:text-xs">
+              <div className="text-[10px] font-semibold text-white/85 sm:text-[11px]">
                 {hud.activeBanner.subtext}
               </div>
             )}
@@ -425,75 +512,83 @@ export const GameHUD: React.FC<GameHUDProps> = ({
         })}
       </div>
 
-      {/* Bottom Support Troop Recruitment Dock */}
+      {/* Bottom Support Troop Recruitment Dock (Dynamically unlocked Allies from ALLY_ALBUM) */}
       <div className="pointer-events-none flex w-full justify-center">
-        <div className="pointer-events-auto grid w-full max-w-md grid-cols-3 gap-1.5 rounded-2xl border-2 border-[#334155] bg-[#0F172A]/96 p-1.5 shadow-[0_6px_0_rgba(2,6,23,0.85)] sm:flex sm:w-auto sm:max-w-none sm:items-center sm:gap-2.5 sm:p-2">
-          {UNIT_ORDER.map((kind) => {
-            const spec = UNIT_SPECS[kind];
-            const isSelected = hud.selectedUnit === kind;
-            const canAfford = hud.essence >= spec.cost;
-            return (
-              <div
-                key={kind}
-                className={`flex flex-col justify-between gap-1 rounded-xl border-2 p-1.5 transition-colors sm:flex-row sm:items-center sm:gap-2 sm:px-2.5 sm:py-1.5 ${
-                  isSelected
-                    ? 'border-[#FACC15] bg-[#1E293B]'
-                    : 'border-[#1E293B] bg-[#080D1A]/90 hover:border-[#334155]'
-                } ${!canAfford ? 'opacity-70' : ''}`}
-              >
-                <button
-                  type="button"
-                  tabIndex={-1}
-                  onPointerDown={(e) => {
-                    onSelectUnit(kind);
-                    onStartCardDrag(kind, e.clientX, e.clientY);
-                  }}
-                  onClick={(e) => {
-                    e.currentTarget.blur();
-                    onSelectUnit(kind);
-                  }}
-                  className="flex min-w-0 flex-1 cursor-grab touch-none flex-col items-start gap-1 text-left active:cursor-grabbing sm:flex-row sm:items-center sm:gap-2.5"
-                >
-                  <div className="flex w-full items-center justify-between gap-1 sm:w-auto">
-                    <UnitIcon kind={kind} />
-                    <span className="font-mono-tabular rounded bg-[#0F172A] px-1.5 py-0.5 text-[11px] font-bold text-[#FACC15] sm:hidden">
-                      {spec.cost}
-                    </span>
+        {(() => {
+          const unlockedAllies = getUnlockedAlliesForStage(
+            Math.max(hud.stage, hud.highestUnlockedStage)
+          );
+          return (
+            <div
+              data-testid="ally-dock"
+              className="pointer-events-auto flex max-w-[96vw] items-center gap-1.5 overflow-x-auto rounded-2xl border-2 border-[#334155] bg-[#0F172A]/96 p-1.5 shadow-[0_6px_0_rgba(2,6,23,0.85)] sm:gap-2 sm:p-2"
+            >
+              {unlockedAllies.map((ally) => {
+                const kind = ally.unitKind;
+                const spec = UNIT_SPECS[kind];
+                const isSelected = hud.selectedUnit === kind;
+                const canAfford = hud.essence >= spec.cost;
+                return (
+                  <div
+                    key={kind}
+                    data-testid={`dock-unit-${kind}`}
+                    className={`flex shrink-0 items-center gap-1.5 rounded-xl border-2 px-2 py-1.5 transition-colors sm:gap-2 sm:px-2.5 ${
+                      isSelected
+                        ? 'border-[#FACC15] bg-[#1E293B]'
+                        : 'border-[#1E293B] bg-[#080D1A]/90 hover:border-[#334155]'
+                    } ${!canAfford ? 'opacity-70' : ''}`}
+                  >
+                    <button
+                      type="button"
+                      tabIndex={-1}
+                      onPointerDown={(e) => {
+                        onSelectUnit(kind);
+                        onStartCardDrag(kind, e.clientX, e.clientY);
+                      }}
+                      onClick={(e) => {
+                        e.currentTarget.blur();
+                        onSelectUnit(kind);
+                      }}
+                      className="flex min-w-0 cursor-grab touch-none items-center gap-2 text-left active:cursor-grabbing"
+                    >
+                      <UnitIcon kind={kind} />
+                      <div className="min-w-0 leading-tight">
+                        <div className="flex items-center gap-1.5 whitespace-nowrap text-xs font-bold text-white sm:text-sm">
+                          <span>{spec.name}</span>
+                          <span className="font-mono-tabular text-[11px] text-[#FACC15]">
+                            [{ally.hotkey}]
+                          </span>
+                        </div>
+                        <div className="flex items-center gap-1.5 whitespace-nowrap text-[11px] text-[#94A3B8]">
+                          <span className="font-mono-tabular font-bold text-[#FACC15]">
+                            {spec.cost} ess.
+                          </span>
+                          <span aria-hidden="true">·</span>
+                          <span className="text-[10px] sm:text-[11px]" style={{ color: ally.colorHex }}>
+                            {spec.shortRole}
+                          </span>
+                        </div>
+                      </div>
+                    </button>
+                    <button
+                      type="button"
+                      tabIndex={-1}
+                      aria-label={`Recrutar ${spec.name} em slot livre (${spec.cost} essência)`}
+                      disabled={!canAfford}
+                      onClick={(e) => {
+                        e.currentTarget.blur();
+                        onQuickRecruit(kind);
+                      }}
+                      className="flex h-8 w-8 shrink-0 items-center justify-center rounded-lg border border-[#020617] bg-[#00D4FF] text-xs font-bold text-[#020617] shadow-[0_2px_0_#0369A1] transition-transform active:translate-y-0.5 hover:bg-[#38BDF8] disabled:cursor-not-allowed disabled:opacity-40 sm:h-9 sm:w-9"
+                    >
+                      <Plus className="h-4 w-4 stroke-[3]" />
+                    </button>
                   </div>
-                  <div className="min-w-0 leading-tight">
-                    <div className="flex items-center gap-1.5 whitespace-nowrap text-xs font-bold text-white sm:text-sm">
-                      <span>{spec.name}</span>
-                      <span className="font-mono-tabular hidden text-[11px] text-[#FACC15] sm:inline">
-                        [{spec.hotkey}]
-                      </span>
-                    </div>
-                    <div className="flex items-center gap-1.5 whitespace-nowrap text-[11px] text-[#94A3B8]">
-                      <span className="font-mono-tabular hidden font-bold text-[#FACC15] sm:inline">
-                        {spec.cost} ess.
-                      </span>
-                      <span aria-hidden="true" className="hidden sm:inline">·</span>
-                      <span className="text-[10px] text-[#00D4FF] sm:text-[11px]">{spec.shortRole}</span>
-                    </div>
-                  </div>
-                </button>
-                <button
-                  type="button"
-                  tabIndex={-1}
-                  aria-label={`Recrutar ${spec.name} em slot livre (${spec.cost} essência)`}
-                  disabled={!canAfford}
-                  onClick={(e) => {
-                    e.currentTarget.blur();
-                    onQuickRecruit(kind);
-                  }}
-                  className="flex h-8 w-full shrink-0 items-center justify-center gap-1 rounded-lg border border-[#020617] bg-[#00D4FF] text-xs font-bold text-[#020617] shadow-[0_2px_0_#0369A1] transition-transform active:translate-y-0.5 hover:bg-[#38BDF8] disabled:cursor-not-allowed disabled:opacity-40 sm:h-9 sm:w-9"
-                >
-                  <Plus className="h-4 w-4 stroke-[3]" />
-                  <span className="sm:hidden">Criar</span>
-                </button>
-              </div>
-            );
-          })}
-        </div>
+                );
+              })}
+            </div>
+          );
+        })()}
       </div>
     </div>
   );

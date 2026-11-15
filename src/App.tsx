@@ -1,10 +1,19 @@
 import { useCallback, useEffect, useRef, useState } from 'react';
+import { AlbumModal, AlbumTab } from './components/AlbumModal';
 import { GameCanvas } from './components/GameCanvas';
 import { GameHUD } from './components/GameHUD';
 import { GameModals } from './components/GameModals';
 import { soundEngine } from './game/audio';
+import { getUnlockedAlliesForStage } from './game/bestiaryData';
 import { GameSimulation } from './game/simulation';
-import { HeroClass, HudSnapshot, SpellKind, TOTAL_STAGES, UnitKind } from './game/types';
+import {
+  HeroClass,
+  HeroUpgradeId,
+  HudSnapshot,
+  SpellKind,
+  TOTAL_STAGES,
+  UnitKind,
+} from './game/types';
 
 export default function App() {
   const simRef = useRef<GameSimulation | null>(null);
@@ -13,10 +22,16 @@ export default function App() {
     if (typeof window !== 'undefined') {
       const params = new URLSearchParams(window.location.search);
       const stageParam = Number(params.get('stage'));
-      const initialStage =
+      const wantsConvergence = params.get('convergence') === '1';
+      let initialStage =
         Number.isFinite(stageParam) && stageParam >= 1 && stageParam <= TOTAL_STAGES
           ? stageParam
-          : 1;
+          : wantsConvergence
+            ? (sim.convergenceStages[0] ?? 6)
+            : 1;
+      if (wantsConvergence && !sim.convergenceStages.includes(initialStage)) {
+        sim.convergenceStages = [...sim.convergenceStages, initialStage].sort((a, b) => a - b);
+      }
       const heroParam = params.get('hero');
       const heroOverride: HeroClass | undefined =
         heroParam === 'archer' || heroParam === 'swordsman' || heroParam === 'bomber'
@@ -27,6 +42,8 @@ export default function App() {
       }
       if (params.get('autostart') === '1') {
         sim.resetWorld('playing', initialStage, heroOverride);
+      } else if (wantsConvergence) {
+        sim.resetWorld('title', initialStage, heroOverride);
       }
     }
     simRef.current = sim;
@@ -41,16 +58,24 @@ export default function App() {
   const [selectedStage, setSelectedStage] = useState<number>(
     () => simRef.current!.currentStage
   );
+  const [albumTab, setAlbumTab] = useState<AlbumTab | null>(null);
 
   const syncBodyDataset = useCallback((snap: HudSnapshot) => {
     document.body.dataset.state = snap.phase === 'victory' ? 'gameover' : snap.phase;
     document.body.dataset.outcome = snap.phase;
     document.body.dataset.stage = String(snap.stage);
     document.body.dataset.route = snap.routeArchetype;
+    document.body.dataset.routeLevel = String(snap.routeLevel);
+    document.body.dataset.openGates = String(snap.openGatesCount);
+    document.body.dataset.maxRoutes = String(snap.maxRouteLevel);
+    document.body.dataset.convergence = snap.isConvergenceStage ? '1' : '0';
+    document.body.dataset.activeHeroes = String(snap.activeHeroes.length);
+    document.body.dataset.evolutionPoints = String(snap.evolutionPoints);
     document.body.dataset.unlocked = String(snap.highestUnlockedStage);
     document.body.dataset.heroClass = snap.selectedHeroClass;
     document.body.dataset.heroLevel = String(snap.heroLevel);
     document.body.dataset.heroXp = String(snap.heroXp);
+    document.body.dataset.heroUpgrades = String(snap.heroUpgradesCount);
     document.body.dataset.units = String(snap.unitCount);
     document.body.dataset.merges = String(snap.mergesPerformed);
     document.body.dataset.maxUnitLevel = String(snap.maxUnitLevelReached);
@@ -186,6 +211,38 @@ export default function App() {
     syncHud();
   }, [syncHud]);
 
+  const handleSelectActiveHero = useCallback(
+    (index: number) => {
+      const sim = simRef.current;
+      if (!sim) return;
+      sim.selectActiveHero(index);
+      syncHud();
+    },
+    [syncHud]
+  );
+
+  const handleEvolveHero = useCallback(
+    (heroClass: HeroClass) => {
+      const sim = simRef.current;
+      if (!sim) return;
+      if (sim.evolveHeroInMenu(heroClass)) {
+        syncHud();
+      }
+    },
+    [syncHud]
+  );
+
+  const handleSelectUpgrade = useCallback(
+    (upgradeId: HeroUpgradeId) => {
+      const sim = simRef.current;
+      if (!sim) return;
+      if (sim.applyHeroUpgradeChoice(upgradeId)) {
+        syncHud();
+      }
+    },
+    [syncHud]
+  );
+
   const handleActivateSpell = useCallback(
     (kind: SpellKind) => {
       const sim = simRef.current;
@@ -216,7 +273,7 @@ export default function App() {
       const sim = simRef.current;
       if (!sim) return;
 
-      if (sim.phase === 'title' && (e.key === 'Enter' || e.key === ' ')) {
+      if (sim.phase === 'title' && albumTab === null && (e.key === 'Enter' || e.key === ' ')) {
         e.preventDefault();
         handleStart(selectedStage);
         return;
@@ -232,7 +289,7 @@ export default function App() {
         return;
       }
 
-      if (e.key === 'p' || e.key === 'P' || e.key === 'Escape') {
+      if (e.key === 'p' || e.key === 'P' || (e.key === 'Escape' && albumTab === null)) {
         if (sim.phase === 'playing' || sim.phase === 'paused') {
           e.preventDefault();
           handleTogglePause();
@@ -258,10 +315,15 @@ export default function App() {
       }
 
       if (sim.phase === 'playing') {
-        if (e.key === '1') handleSelectUnit('scout');
-        else if (e.key === '2') handleSelectUnit('shield');
-        else if (e.key === '3') handleSelectUnit('frog');
-        else if (e.key === 'h' || e.key === 'H') handleToggleHeroReposition();
+        if (/^[0-9]$/.test(e.key)) {
+          const unlocked = getUnlockedAlliesForStage(
+            Math.max(sim.currentStage, sim.highestUnlockedStage)
+          );
+          const matchedAlly = unlocked.find((a) => a.hotkey === e.key);
+          if (matchedAlly) {
+            handleSelectUnit(matchedAlly.unitKind);
+          }
+        } else if (e.key === 'h' || e.key === 'H') handleToggleHeroReposition();
         else if (e.key === 'q' || e.key === 'Q') handleActivateSpell('blade');
         else if (e.key === 'w' || e.key === 'W') handleActivateSpell('shockwave');
         else if (e.key === 'e' || e.key === 'E') handleActivateSpell('overcharge');
@@ -271,6 +333,7 @@ export default function App() {
     window.addEventListener('keydown', onKeyDown);
     return () => window.removeEventListener('keydown', onKeyDown);
   }, [
+    albumTab,
     handleActivateSpell,
     handleSelectUnit,
     handleStart,
@@ -294,6 +357,7 @@ export default function App() {
         onQuickRecruit={handleQuickRecruit}
         onStartCardDrag={handleStartCardDrag}
         onToggleHeroReposition={handleToggleHeroReposition}
+        onSelectActiveHero={handleSelectActiveHero}
         onActivateSpell={handleActivateSpell}
         onTogglePause={handleTogglePause}
         onToggleMuteMusic={handleToggleMuteMusic}
@@ -303,13 +367,23 @@ export default function App() {
       <GameModals
         hud={hud}
         selectedStage={selectedStage}
+        convergenceStages={simRef.current!.convergenceStages}
         onSelectHero={handleSelectHero}
+        onEvolveHero={handleEvolveHero}
         onSelectStage={handleSelectStage}
+        onSelectUpgrade={handleSelectUpgrade}
         onStart={handleStart}
         onNextStage={handleNextStage}
         onResume={handleResume}
         onRestart={() => handleStart(hud.stage)}
         onReturnTitle={handleReturnTitle}
+        onOpenAlbum={(tab) => setAlbumTab(tab)}
+      />
+      <AlbumModal
+        isOpen={albumTab !== null}
+        initialTab={albumTab ?? 'enemies'}
+        highestUnlockedStage={hud.highestUnlockedStage}
+        onClose={() => setAlbumTab(null)}
       />
     </main>
   );

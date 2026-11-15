@@ -1,6 +1,7 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import {
+  advanceEnemyAlongRoute,
   applyDamageToBase,
   applyDamageToEnemy,
   applyDamageToUnit,
@@ -8,8 +9,9 @@ import {
   buildArenaSlots,
   canMergeUnits,
   circlesCollide,
-  computePerimeterSpawnPoint,
   computeRadialKnockbackVector,
+  computeRouteSpawnPoint,
+  computeRouteTotalLength,
   computeViewportTransform,
   computeWaveConfig,
   findBlockingUnitForEnemy,
@@ -18,10 +20,19 @@ import {
   findSlotAtPoint,
   formatSurvivalTime,
   getStageConfig,
+  pointToSegmentDistance,
+  pushEnemyBackAlongRoute,
   rollCriticalHit,
   unlockNextStage,
 } from './engineMath';
-import { DEFAULT_ARENA, EnemyEntity, MAX_UNIT_LEVEL, TOTAL_STAGES, UNIT_SPECS, UnitEntity } from './types';
+import {
+  DEFAULT_ARENA,
+  EnemyEntity,
+  MAX_UNIT_LEVEL,
+  TOTAL_STAGES,
+  UNIT_SPECS,
+  UnitEntity,
+} from './types';
 
 test('computeViewportTransform adapts to both landscape and portrait without distortion', () => {
   const landscape = computeViewportTransform(1280, 720, DEFAULT_ARENA);
@@ -29,8 +40,8 @@ test('computeViewportTransform adapts to both landscape and portrait without dis
   assert.ok(landscape.offsetX > 0);
 
   const portrait = computeViewportTransform(390, 844, DEFAULT_ARENA);
-  assert.ok(portrait.scale > 0.5 && portrait.scale < 0.6);
-  // Arena center maps to horizontal & vertical center on portrait mobile
+  assert.ok(portrait.scale > 0.3 && portrait.scale < 0.45);
+  // Route center maps to horizontal & vertical center on portrait mobile
   const screenCenterX = DEFAULT_ARENA.centerX * portrait.scale + portrait.offsetX;
   const screenCenterY = DEFAULT_ARENA.centerY * portrait.scale + portrait.offsetY;
   assert.equal(Math.round(screenCenterX), 195);
@@ -41,10 +52,10 @@ function makeEnemy(overrides: Partial<EnemyEntity> = {}): EnemyEntity {
   return {
     id: 1,
     kind: 'walker',
-    x: 600,
-    y: 120,
-    vx: 0,
-    vy: 30,
+    x: 96,
+    y: 265,
+    vx: 30,
+    vy: 0,
     radius: 18,
     hp: 20,
     maxHp: 20,
@@ -57,6 +68,9 @@ function makeEnemy(overrides: Partial<EnemyEntity> = {}): EnemyEntity {
     rewardScore: 15,
     walkPhase: 0,
     distanceTraveled: 0,
+    waypointIndex: 1,
+    laneOffset: 0,
+    pathProgress: 0,
     hitFlash: 0,
     knockbackVx: 0,
     knockbackVy: 0,
@@ -75,9 +89,9 @@ function makeUnit(overrides: Partial<UnitEntity> = {}): UnitEntity {
   return {
     id: 10,
     kind: 'shield',
-    slotId: 'r2-3',
-    x: 500,
-    y: 500,
+    slotId: 's-4',
+    x: 385,
+    y: 345,
     hp: spec.maxHp,
     maxHp: spec.maxHp,
     range: spec.range,
@@ -119,28 +133,58 @@ test('formatSurvivalTime formats elapsed seconds into MM:SS', () => {
   assert.equal(formatSurvivalTime(125.9), '02:05');
 });
 
-test('buildArenaSlots generates concentric circular slots centered around arena center', () => {
+test('buildArenaSlots places roadside tactical pads cleanly off the route and non-overlapping', () => {
   const slots = buildArenaSlots(DEFAULT_ARENA);
-  assert.equal(slots.length, 16);
-  const ring1 = slots.filter((s) => s.ring === 1);
-  const ring2 = slots.filter((s) => s.ring === 2);
-  assert.equal(ring1.length, 6);
-  assert.equal(ring2.length, 10);
+  assert.equal(slots.length, 15);
 
-  for (const s of ring1) {
-    const dist = Math.hypot(s.x - DEFAULT_ARENA.centerX, s.y - DEFAULT_ARENA.centerY);
-    assert.ok(Math.abs(dist - 102) <= 2, `Expected ring 1 dist ~102, got ${dist}`);
+  const wps = DEFAULT_ARENA.waypoints;
+  for (const s of slots) {
+    let minRoadDist = Infinity;
+    for (let i = 0; i < wps.length - 1; i++) {
+      const d = pointToSegmentDistance(s.x, s.y, wps[i].x, wps[i].y, wps[i + 1].x, wps[i + 1].y);
+      if (d < minRoadDist) minRoadDist = d;
+    }
+    assert.ok(
+      minRoadDist >= DEFAULT_ARENA.roadHalfWidth + 24,
+      `Slot ${s.id} too close to road (${minRoadDist.toFixed(1)}px)`
+    );
+  }
+
+  for (let i = 0; i < slots.length; i++) {
+    for (let j = i + 1; j < slots.length; j++) {
+      const d = Math.hypot(slots[i].x - slots[j].x, slots[i].y - slots[j].y);
+      assert.ok(d >= 72, `Slots ${slots[i].id} and ${slots[j].id} overlap (${d.toFixed(1)}px)`);
+    }
   }
 });
 
-test('computePerimeterSpawnPoint places enemies on outer circle perimeter', () => {
-  const right = computePerimeterSpawnPoint(0, DEFAULT_ARENA, 0);
-  assert.equal(Math.round(right.x), DEFAULT_ARENA.centerX + DEFAULT_ARENA.spawnRadius);
-  assert.equal(Math.round(right.y), DEFAULT_ARENA.centerY);
+test('computeRouteSpawnPoint and advanceEnemyAlongRoute march enemies from portal to castle', () => {
+  const wps = DEFAULT_ARENA.waypoints;
+  const totalLen = computeRouteTotalLength(wps);
+  const spawn = computeRouteSpawnPoint(wps, 0);
+  assert.equal(Math.round(spawn.x), wps[0].x);
+  assert.equal(Math.round(spawn.y), wps[0].y);
 
-  const bottom = computePerimeterSpawnPoint(Math.PI / 2, DEFAULT_ARENA, 0);
-  assert.equal(Math.round(bottom.x), DEFAULT_ARENA.centerX);
-  assert.equal(Math.round(bottom.y), DEFAULT_ARENA.centerY + DEFAULT_ARENA.spawnRadius);
+  const enemy = makeEnemy({ x: spawn.x, y: spawn.y, waypointIndex: 1, laneOffset: 0 });
+  const step1 = advanceEnemyAlongRoute(enemy, wps, 120, 40, totalLen);
+  assert.equal(step1.reachedCastle, false);
+  assert.ok(enemy.pathProgress > 0 && enemy.pathProgress < 0.25);
+
+  // Advance enough to reach the Castle
+  const stepFinal = advanceEnemyAlongRoute(enemy, wps, totalLen + 200, 40, totalLen);
+  assert.equal(stepFinal.reachedCastle, true);
+  assert.equal(enemy.pathProgress, 1);
+});
+
+test('pushEnemyBackAlongRoute moves enemies backward along route segments without leaving road', () => {
+  const wps = DEFAULT_ARENA.waypoints;
+  const totalLen = computeRouteTotalLength(wps);
+  const enemy = makeEnemy({ x: wps[0].x, y: wps[0].y, waypointIndex: 1 });
+  advanceEnemyAlongRoute(enemy, wps, 350, 40, totalLen);
+  const progressBefore = enemy.pathProgress;
+
+  pushEnemyBackAlongRoute(enemy, wps, 160, totalLen);
+  assert.ok(enemy.pathProgress < progressBefore);
 });
 
 test('circlesCollide accurately detects hit and miss boundaries', () => {
@@ -158,19 +202,19 @@ test('rollCriticalHit multiplies damage by 1.75 when rng is below critChance', (
   assert.equal(normal.damage, 20);
 });
 
-test('computeRadialKnockbackVector pushes enemies outward from arena center', () => {
+test('computeRadialKnockbackVector pushes outward from origin', () => {
   const v = computeRadialKnockbackVector(600, 420, 700, 420, 420);
   assert.equal(Math.round(v.vx), 420);
   assert.equal(Math.round(v.vy), 0);
 });
 
-test('findNearestEnemyInRange prioritizes enemies in range closest to core', () => {
-  const unit = { x: 450, y: 420, range: 220 };
-  const farOutOfRange = makeEnemy({ id: 1, x: 950, y: 420 });
-  const outerInRange = makeEnemy({ id: 2, x: 320, y: 420 });
-  const innerInRange = makeEnemy({ id: 3, x: 520, y: 420 });
+test('findNearestEnemyInRange prioritizes enemies furthest along the route toward the Castle', () => {
+  const unit = { x: 420, y: 420, range: 260 };
+  const farOutOfRange = makeEnemy({ id: 1, x: 950, y: 420, pathProgress: 0.9 });
+  const trailingInRange = makeEnemy({ id: 2, x: 350, y: 420, pathProgress: 0.2 });
+  const leadingInRange = makeEnemy({ id: 3, x: 520, y: 420, pathProgress: 0.55 });
 
-  const target = findNearestEnemyInRange(unit, [farOutOfRange, outerInRange, innerInRange], DEFAULT_ARENA);
+  const target = findNearestEnemyInRange(unit, [farOutOfRange, trailingInRange, leadingInRange], DEFAULT_ARENA);
   assert.equal(target?.id, 3);
 });
 

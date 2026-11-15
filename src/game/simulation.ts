@@ -1,21 +1,22 @@
 import { soundEngine } from './audio';
 import {
+  advanceEnemyAlongRoute,
   applyDamageToBase,
   applyDamageToEnemy,
-  applyDamageToUnit,
   applyMergeUpgrade,
   buildArenaSlots,
   canMergeUnits,
   circlesCollide,
-  computePerimeterSpawnPoint,
   computeRadialKnockbackVector,
+  computeRouteSpawnPoint,
+  computeRouteTotalLength,
   computeWaveConfig,
   distanceBetween,
-  findBlockingUnitForEnemy,
   findEnemiesInSlashArc,
   findNearestEnemyInRange,
   findSlotAtPoint,
   getStageConfig,
+  pushEnemyBackAlongRoute,
   rollCriticalHit,
   unlockNextStage,
 } from './engineMath';
@@ -50,6 +51,7 @@ const PARTICLE_POOL_SIZE = 320;
 
 export class GameSimulation {
   public readonly arena: ArenaConfig = DEFAULT_ARENA;
+  public readonly routeTotalLength: number;
   public phase: GamePhase = 'title';
   public currentStage = 1;
   public totalWavesInStage = 2;
@@ -69,7 +71,7 @@ export class GameSimulation {
   public baseHp = 100;
   public baseMaxHp = 100;
   public baseLevel = 1;
-  public essence = 95;
+  public essence = 100;
   public essenceCollected = 0;
   public score = 0;
   public bestScore = 0;
@@ -111,12 +113,12 @@ export class GameSimulation {
   private waveBossHp = 280;
   private bossSpawnedInWave = false;
   private waveMix: Record<Exclude<EnemyKind, 'boss'>, number> = { walker: 0.7, shielded: 0.22, brute: 0.08 };
-  private spawnSectorIndex = 0;
   private surgeScheduleTimer = 3.2;
   private overchargeTickTimer = 0;
   private lowHpAlarmTimer = 0;
 
   constructor() {
+    this.routeTotalLength = computeRouteTotalLength(this.arena.waypoints);
     for (let i = 0; i < PARTICLE_POOL_SIZE; i++) {
       this.particles.push({
         active: false,
@@ -182,8 +184,7 @@ export class GameSimulation {
     this.cameraTrauma = 0;
     this.baseHitFlash = 0;
     this.nextEntityId = 1;
-    this.spawnSectorIndex = 0;
-    this.surgeScheduleTimer = 3.2;
+    this.surgeScheduleTimer = 4.2;
     this.overchargeTickTimer = 0;
     this.lowHpAlarmTimer = 0;
     this.bossSpawnedInWave = false;
@@ -199,29 +200,33 @@ export class GameSimulation {
       overchargeTimer: 0,
     };
 
-    this.deployUnitToSlotId('r2-5', 'scout', true);
-    this.deployUnitToSlotId('r2-4', 'shield', true);
-    this.deployUnitToSlotId('r2-3', 'shield', true);
-    this.deployUnitToSlotId('r1-0', 'frog', true);
+    // Deploy strategic starter defenders along the route bends
+    this.deployUnitToSlotId('s-2', 'scout', true);
+    this.deployUnitToSlotId('s-4', 'shield', true);
+    this.deployUnitToSlotId('s-5', 'shield', true);
+    this.deployUnitToSlotId('s-10', 'frog', true);
 
     this.startWave(1);
 
     if (targetPhase === 'playing') {
-      this.spawnEnemyAtAngle(-0.45, 'brute');
-      this.spawnEnemyAtAngle(0.35, 'walker');
-      this.spawnEnemyAtAngle(2.25, 'shielded');
-      this.spawnEnemyAtAngle(4.1, 'walker');
-      this.waveRemainingToSpawn = Math.max(2, this.waveRemainingToSpawn - 4);
-      // Immediate subtle directional indicator for first surge
-      this.queueHordeWarning(0.85, 3);
+      // Spawn initial vanguard along early path so combat begins cleanly without crowding
+      this.spawnEnemyAlongRoute('walker', 0.14);
+      this.spawnEnemyAlongRoute('shielded', 0.08);
+      this.spawnEnemyAlongRoute('walker', 0.02);
+      this.waveRemainingToSpawn = Math.max(2, this.waveRemainingToSpawn - 3);
+      this.queueHordeWarning(3, false);
     }
   }
 
-  private queueHordeWarning(angle: number, spawnCount: number, isBoss = false) {
+  private queueHordeWarning(spawnCount: number, isBoss = false) {
+    const start = this.arena.waypoints[0] ?? { x: 96, y: 265 };
+    const next = this.arena.waypoints[1] ?? { x: 245, y: 265 };
     this.hordeWarnings.push({
-      angle,
-      timer: isBoss ? 2.4 : 2.1,
-      maxTimer: isBoss ? 2.4 : 2.1,
+      x: start.x,
+      y: start.y,
+      angle: Math.atan2(next.y - start.y, next.x - start.x),
+      timer: isBoss ? 2.4 : 1.9,
+      maxTimer: isBoss ? 2.4 : 1.9,
       spawnCount,
       spawned: false,
       isBoss,
@@ -239,18 +244,13 @@ export class GameSimulation {
     this.waveBossHp = cfg.bossHp;
     this.bossSpawnedInWave = false;
     this.waveMix = cfg.mix;
-    this.waveSpawnTimer = 0.6;
+    this.waveSpawnTimer = 0.65;
     this.waveBreakTimer = 0;
 
     if (waveNum >= 2) {
-      for (const u of this.units) {
-        if (u.hp > 0 && u.hp < u.maxHp) {
-          u.hp = Math.min(u.maxHp, u.hp + Math.round(u.maxHp * 0.15));
-        }
-      }
       this.queueHordeWarning(
-        Math.random() * Math.PI * 2,
-        Math.min(5, 2 + Math.floor((waveNum + this.currentStage) / 2))
+        Math.min(4, 2 + Math.floor((waveNum + this.currentStage) / 2)),
+        false
       );
     }
 
@@ -258,12 +258,12 @@ export class GameSimulation {
     if (nextLevel > this.baseLevel) {
       this.baseLevel = nextLevel;
       this.floatingTexts.push({
-        x: this.arena.centerX,
-        y: this.arena.centerY - 58,
+        x: this.arena.castleX,
+        y: this.arena.castleY - 72,
         vy: -28,
-        text: `Núcleo Nv.${this.baseLevel}!`,
+        text: `Castelo Nv.${this.baseLevel}!`,
         color: '#FDE047',
-        scale: 1.25,
+        scale: 1.22,
         life: 1.15,
         maxLife: 1.15,
       });
@@ -333,37 +333,30 @@ export class GameSimulation {
     this.spells.cooldowns.shockwave = this.spells.maxCooldowns.shockwave;
 
     this.shockwaves.push({
-      x: this.arena.centerX,
-      y: this.arena.centerY,
-      currentRadius: this.arena.coreRadius,
-      maxRadius: 430,
-      life: 0.55,
-      maxLife: 0.55,
+      x: this.arena.castleX,
+      y: this.arena.castleY,
+      currentRadius: this.arena.castleRadius,
+      maxRadius: 960,
+      life: 0.65,
+      maxLife: 0.65,
     });
 
     for (const enemy of this.enemies) {
       if (enemy.isDead) continue;
-      const kb = computeRadialKnockbackVector(
-        this.arena.centerX,
-        this.arena.centerY,
-        enemy.x,
-        enemy.y,
-        440
-      );
-      enemy.knockbackVx += kb.vx;
-      enemy.knockbackVy += kb.vy;
-      enemy.stunTimer = Math.max(enemy.stunTimer, 0.55);
-      this.handleEnemyDamaged(enemy, 16, 0, 0, true, false);
+      const pushDist = enemy.kind === 'boss' ? 75 : 145;
+      pushEnemyBackAlongRoute(enemy, this.arena.waypoints, pushDist, this.routeTotalLength);
+      enemy.stunTimer = Math.max(enemy.stunTimer, 0.65);
+      this.handleEnemyDamaged(enemy, 18, 0, 0, true, false);
     }
 
-    this.cameraTrauma = Math.min(1, this.cameraTrauma + 0.65);
+    this.cameraTrauma = Math.min(1, this.cameraTrauma + 0.62);
     this.hitstopTimer = 0.05;
     soundEngine.playSpellShockwave();
-    this.spawnTypedParticles(this.arena.centerX, this.arena.centerY, 22, 'spark', '#7DD3FC', 250, 0.52);
-    this.spawnTypedParticles(this.arena.centerX, this.arena.centerY, 16, 'smoke', '#E2E8F0', 140, 0.6);
+    this.spawnTypedParticles(this.arena.castleX, this.arena.castleY, 22, 'spark', '#7DD3FC', 240, 0.52);
+    this.spawnTypedParticles(this.arena.castleX, this.arena.castleY, 16, 'smoke', '#E2E8F0', 140, 0.6);
     this.floatingTexts.push({
-      x: this.arena.centerX,
-      y: this.arena.centerY - 58,
+      x: this.arena.castleX - 40,
+      y: this.arena.castleY - 78,
       vy: -30,
       text: 'Onda de Choque!',
       color: '#7DD3FC',
@@ -381,10 +374,10 @@ export class GameSimulation {
 
     this.cameraTrauma = Math.min(1, this.cameraTrauma + 0.25);
     soundEngine.playSpellOvercharge();
-    this.spawnTypedParticles(this.arena.centerX, this.arena.centerY, 20, 'spark', '#FDE047', 165, 0.55);
+    this.spawnTypedParticles(this.arena.castleX, this.arena.castleY - 12, 20, 'spark', '#FDE047', 165, 0.55);
     this.floatingTexts.push({
-      x: this.arena.centerX,
-      y: this.arena.centerY - 58,
+      x: this.arena.castleX - 24,
+      y: this.arena.castleY - 78,
       vy: -32,
       text: 'SuperCarga 10s!',
       color: '#FDE047',
@@ -452,9 +445,9 @@ export class GameSimulation {
     if (!freeSlot) {
       this.floatingTexts.push({
         x: this.arena.centerX,
-        y: this.arena.centerY - 64,
+        y: this.arena.centerY - 40,
         vy: -24,
-        text: 'Arena cheia! Funda tropas',
+        text: 'Mapa cheio! Funda tropas',
         color: '#FDE047',
         scale: 0.95,
         life: 0.9,
@@ -645,15 +638,13 @@ export class GameSimulation {
     return 'brute';
   }
 
-  private spawnEnemyAtAngle(angle: number, forcedKind?: EnemyKind) {
+  private spawnEnemyAlongRoute(forcedKind?: EnemyKind, initialProgressFrac = 0) {
     const kind = forcedKind ?? this.pickEnemyKind();
-    const pos = computePerimeterSpawnPoint(angle, this.arena, (Math.random() - 0.5) * 24);
-    const dx = this.arena.centerX - pos.x;
-    const dy = this.arena.centerY - pos.y;
-    const dist = Math.hypot(dx, dy) || 1;
+    const laneOffset = kind === 'boss' ? 0 : (Math.random() - 0.5) * 20;
+    const spawn = computeRouteSpawnPoint(this.arena.waypoints, laneOffset);
 
-    let baseHp = 20;
-    let baseSpeed = 34;
+    let baseHp = 22;
+    let baseSpeed = 46;
     let radius = 17;
     let damage = 10;
     let attackCooldown = 1.05;
@@ -661,16 +652,16 @@ export class GameSimulation {
     let rewardScore = 15;
 
     if (kind === 'shielded') {
-      baseHp = 45;
-      baseSpeed = 27;
+      baseHp = 48;
+      baseSpeed = 36;
       radius = 20;
       damage = 14;
       attackCooldown = 1.15;
       rewardEssence = 12;
       rewardScore = 25;
     } else if (kind === 'brute') {
-      baseHp = 88;
-      baseSpeed = 30;
+      baseHp = 90;
+      baseSpeed = 40;
       radius = 22;
       damage = 18;
       attackCooldown = 1.2;
@@ -678,7 +669,7 @@ export class GameSimulation {
       rewardScore = 40;
     } else if (kind === 'boss') {
       baseHp = this.waveBossHp;
-      baseSpeed = 21;
+      baseSpeed = 29;
       radius = 34;
       damage = 28 + this.currentStage * 4;
       attackCooldown = 1.25;
@@ -689,13 +680,13 @@ export class GameSimulation {
     const hp = kind === 'boss' ? baseHp : Math.round(baseHp * this.waveHpMult);
     const speed = baseSpeed * this.waveSpeedMult;
 
-    this.enemies.push({
+    const enemy: EnemyEntity = {
       id: this.nextEntityId++,
       kind,
-      x: pos.x,
-      y: pos.y,
-      vx: (dx / dist) * speed,
-      vy: (dy / dist) * speed,
+      x: spawn.x,
+      y: spawn.y,
+      vx: Math.cos(spawn.angle) * speed,
+      vy: Math.sin(spawn.angle) * speed,
       radius,
       hp,
       maxHp: hp,
@@ -708,6 +699,9 @@ export class GameSimulation {
       rewardScore,
       walkPhase: Math.random() * Math.PI * 2,
       distanceTraveled: 0,
+      waypointIndex: 1,
+      laneOffset,
+      pathProgress: 0,
       hitFlash: 0,
       knockbackVx: 0,
       knockbackVy: 0,
@@ -717,7 +711,19 @@ export class GameSimulation {
       bracingTimer: 0,
       lungeTimer: 0,
       lungeCooldown: 2.2 + Math.random() * 2.5,
-    });
+    };
+
+    if (initialProgressFrac > 0) {
+      advanceEnemyAlongRoute(
+        enemy,
+        this.arena.waypoints,
+        this.routeTotalLength * initialProgressFrac,
+        speed,
+        this.routeTotalLength
+      );
+    }
+
+    this.enemies.push(enemy);
   }
 
   public spawnParticles(
@@ -769,14 +775,15 @@ export class GameSimulation {
     this.baseHitFlash = Math.max(0, this.baseHitFlash - dt);
 
     if (this.phase === 'title') {
-      if (Math.random() < dt * 8) {
+      const gate = this.arena.waypoints[0];
+      if (gate && Math.random() < dt * 6) {
         this.spawnTypedParticles(
-          this.arena.centerX + (Math.random() - 0.5) * 26,
-          this.arena.centerY - 10,
+          gate.x + (Math.random() - 0.5) * 20,
+          gate.y + (Math.random() - 0.5) * 20,
           1,
           'spark',
-          Math.random() > 0.4 ? '#FDE047' : '#FB923C',
-          42,
+          Math.random() > 0.4 ? '#C084FC' : '#F472B6',
+          38,
           0.9
         );
       }
@@ -822,16 +829,15 @@ export class GameSimulation {
         this.overchargeTickTimer = 0.5;
         this.essence += 3;
         this.essenceCollected += 3;
-        this.spawnTypedParticles(this.arena.centerX, this.arena.centerY - 8, 3, 'spark', '#FDE047', 65, 0.45);
+        this.spawnTypedParticles(this.arena.castleX, this.arena.castleY - 14, 3, 'spark', '#FDE047', 65, 0.45);
       }
     }
 
-    // Directional Horde Surge Warnings
+    // Route Entrance Horde Surge Warnings
     this.surgeScheduleTimer -= dt;
     if (this.surgeScheduleTimer <= 0 && this.waveRemainingToSpawn >= 3) {
-      this.surgeScheduleTimer = Math.max(5.5, 8.5 - this.wave * 0.4);
-      const surgeAngle = Math.random() * Math.PI * 2;
-      this.queueHordeWarning(surgeAngle, Math.min(4, 2 + Math.floor(this.wave / 2)));
+      this.surgeScheduleTimer = Math.max(5.5, 8.8 - this.wave * 0.4);
+      this.queueHordeWarning(Math.min(4, 2 + Math.floor(this.wave / 2)), false);
     }
 
     for (let i = this.hordeWarnings.length - 1; i >= 0; i--) {
@@ -840,12 +846,12 @@ export class GameSimulation {
       if (w.timer <= 0 && !w.spawned) {
         w.spawned = true;
         if (w.isBoss) {
-          this.spawnEnemyAtAngle(w.angle, 'boss');
+          this.spawnEnemyAlongRoute('boss', 0);
           this.cameraTrauma = Math.min(1, this.cameraTrauma + 0.35);
           this.floatingTexts.push({
-            x: this.arena.centerX,
-            y: this.arena.centerY - 72,
-            vy: -24,
+            x: w.x + 80,
+            y: w.y - 46,
+            vy: -22,
             text: 'Chefe da Fase!',
             color: '#F87171',
             scale: 1.35,
@@ -854,10 +860,9 @@ export class GameSimulation {
           });
         } else {
           for (let k = 0; k < w.spawnCount; k++) {
-            const spread = (k - (w.spawnCount - 1) / 2) * 0.14;
-            this.spawnEnemyAtAngle(w.angle + spread);
+            this.spawnEnemyAlongRoute(undefined, k * 0.015);
           }
-          this.cameraTrauma = Math.min(1, this.cameraTrauma + 0.18);
+          this.cameraTrauma = Math.min(1, this.cameraTrauma + 0.14);
         }
         this.hordeWarnings.splice(i, 1);
       }
@@ -891,7 +896,7 @@ export class GameSimulation {
           if (enemy.isDead) continue;
           if (distanceBetween(blade.x, blade.y, enemy.x, enemy.y) <= blade.radius + enemy.radius) {
             const roll = rollCriticalHit(blade.damagePerTick, 0.25);
-            const kb = computeRadialKnockbackVector(blade.x, blade.y, enemy.x, enemy.y, 95);
+            const kb = computeRadialKnockbackVector(blade.x, blade.y, enemy.x, enemy.y, 45);
             this.handleEnemyDamaged(enemy, roll.damage, kb.vx, kb.vy, true, roll.isCrit);
             hitAny = true;
           }
@@ -907,21 +912,18 @@ export class GameSimulation {
       }
     }
 
-    // 1. 360-degree Continuous Wave Spawner & Boss Wave Trigger
+    // 1. Route Wave Spawner & Boss Trigger
     if (this.waveRemainingToSpawn > 0) {
       if (this.isBossWave && !this.bossSpawnedInWave && this.waveRemainingToSpawn <= 3) {
         this.bossSpawnedInWave = true;
-        this.queueHordeWarning(Math.random() * Math.PI * 2, 1, true);
+        this.queueHordeWarning(1, true);
       }
 
       this.waveSpawnTimer -= dt;
       if (this.waveSpawnTimer <= 0) {
-        const sectorAngle = (this.spawnSectorIndex / 8) * Math.PI * 2;
-        this.spawnSectorIndex = (this.spawnSectorIndex + 3) % 8;
-        const angle = sectorAngle + (Math.random() - 0.5) * 0.65;
-        this.spawnEnemyAtAngle(angle);
+        this.spawnEnemyAlongRoute();
         this.waveRemainingToSpawn -= 1;
-        this.waveSpawnTimer = this.waveSpawnInterval * (0.8 + Math.random() * 0.4);
+        this.waveSpawnTimer = this.waveSpawnInterval * (0.82 + Math.random() * 0.36);
       }
     } else if (this.enemies.length === 0 && this.hordeWarnings.length === 0) {
       if (this.wave >= this.totalWavesInStage) {
@@ -942,7 +944,7 @@ export class GameSimulation {
       }
     }
 
-    // 2. Units Auto-Combat
+    // 2. Defenders Auto-Combat
     for (const unit of this.units) {
       unit.cooldownTimer = Math.max(0, unit.cooldownTimer - dt);
       unit.attackAnim = Math.max(0, unit.attackAnim - dt * 4);
@@ -976,8 +978,8 @@ export class GameSimulation {
           this.handleEnemyDamaged(
             enemy,
             roll.damage,
-            proj.vx * 0.12,
-            proj.vy * 0.12,
+            proj.vx * 0.04,
+            proj.vy * 0.04,
             proj.isShockwave,
             roll.isCrit
           );
@@ -994,7 +996,7 @@ export class GameSimulation {
       }
     }
 
-    // 4. Enemies March, Block Engagement & Core Breach
+    // 4. Enemies March Along Route & Castle Breach
     for (let i = this.enemies.length - 1; i >= 0; i--) {
       const enemy = this.enemies[i];
       enemy.hitFlash = Math.max(0, enemy.hitFlash - dt);
@@ -1014,57 +1016,10 @@ export class GameSimulation {
       }
 
       if (enemy.stunTimer > 0) {
-        enemy.x += enemy.knockbackVx * dt;
-        enemy.y += enemy.knockbackVy * dt;
         enemy.knockbackVx *= 0.86;
         enemy.knockbackVy *= 0.86;
         continue;
       }
-
-      const blocker = findBlockingUnitForEnemy(enemy, this.units);
-      if (blocker) {
-        enemy.x += enemy.knockbackVx * dt;
-        enemy.y += enemy.knockbackVy * dt;
-        enemy.knockbackVx *= 0.82;
-        enemy.knockbackVy *= 0.82;
-
-        enemy.attackTimer -= dt;
-        if (enemy.attackTimer <= 0) {
-          enemy.attackTimer = enemy.attackCooldown;
-          enemy.attackAnim = 1;
-          const dmgRes = applyDamageToUnit(blocker, enemy.damage);
-          soundEngine.playUnitHit();
-          this.spawnTypedParticles(blocker.x, blocker.y, 4, 'spark', '#FCA5A5', 75, 0.25);
-
-          if (dmgRes.destroyed) {
-            const slot = this.slots.find((s) => s.id === blocker.slotId);
-            if (slot) slot.unitId = null;
-            this.units = this.units.filter((u) => u.id !== blocker.id);
-            if (this.dragState?.unitId === blocker.id) {
-              this.dragState = null;
-            }
-            this.spawnTypedParticles(blocker.x, blocker.y, 12, 'smoke', '#E2E8F0', 100, 0.48);
-            this.spawnTypedParticles(blocker.x, blocker.y, 8, 'grass', '#4ADE80', 110, 0.4);
-            this.floatingTexts.push({
-              x: blocker.x,
-              y: blocker.y - 24,
-              vy: -30,
-              text: 'Derrotado!',
-              color: '#FCA5A5',
-              scale: 0.95,
-              life: 0.8,
-              maxLife: 0.8,
-            });
-          }
-        }
-        continue;
-      }
-
-      const dx = this.arena.centerX - enemy.x;
-      const dy = this.arena.centerY - enemy.y;
-      const dist = Math.hypot(dx, dy) || 1;
-      const nx = dx / dist;
-      const ny = dy / dist;
 
       let speedMult = 1;
       if (enemy.kind === 'shielded') {
@@ -1074,47 +1029,45 @@ export class GameSimulation {
           enemy.bracingTimer = 0.9;
           enemy.lungeCooldown = 4.2 + Math.random() * 1.5;
         }
-        if (enemy.bracingTimer > 0) speedMult = 0.55;
+        if (enemy.bracingTimer > 0) speedMult = 0.6;
       } else if (enemy.kind === 'brute') {
         enemy.lungeCooldown -= dt;
         if (enemy.lungeTimer > 0) {
           enemy.lungeTimer = Math.max(0, enemy.lungeTimer - dt);
-          speedMult = enemy.lungeTimer > 0.32 ? 0.25 : 2.2;
-        } else if (enemy.lungeCooldown <= 0 && dist < 290 && dist > 90) {
+          speedMult = enemy.lungeTimer > 0.32 ? 0.35 : 2.1;
+        } else if (enemy.lungeCooldown <= 0 && enemy.pathProgress > 0.15 && enemy.pathProgress < 0.88) {
           enemy.lungeTimer = 0.65;
           enemy.lungeCooldown = 3.8 + Math.random() * 1.5;
         }
       }
 
       const moveStep = enemy.speed * speedMult * dt;
-      enemy.vx = nx * enemy.speed * speedMult;
-      enemy.vy = ny * enemy.speed * speedMult;
-      enemy.x += nx * moveStep + enemy.knockbackVx * dt;
-      enemy.y += ny * moveStep + enemy.knockbackVy * dt;
-      enemy.knockbackVx *= 0.85;
-      enemy.knockbackVy *= 0.85;
+      const stepRes = advanceEnemyAlongRoute(
+        enemy,
+        this.arena.waypoints,
+        moveStep,
+        enemy.speed * speedMult,
+        this.routeTotalLength
+      );
 
-      enemy.distanceTraveled += moveStep;
-      enemy.walkPhase = enemy.distanceTraveled * 0.14;
-
-      if (dist <= this.arena.coreRadius + enemy.radius - 4) {
+      if (stepRes.reachedCastle) {
         const result = applyDamageToBase(this.baseHp, enemy.damage);
         this.baseHp = result.nextHp;
-        this.baseHitFlash = 0.22;
+        this.baseHitFlash = 0.28;
         this.cameraTrauma = Math.min(1, this.cameraTrauma + 0.55);
         this.hitstopTimer = 0.045;
         soundEngine.playBaseHit();
-        this.spawnTypedParticles(enemy.x, enemy.y, 12, 'smoke', '#FCA5A5', 110, 0.45);
-        this.spawnTypedParticles(enemy.x, enemy.y, 10, 'spark', '#EF4444', 150, 0.4);
+        this.spawnTypedParticles(this.arena.castleX, this.arena.castleY + 12, 12, 'smoke', '#FCA5A5', 110, 0.45);
+        this.spawnTypedParticles(this.arena.castleX, this.arena.castleY + 12, 10, 'spark', '#EF4444', 150, 0.4);
         this.floatingTexts.push({
-          x: this.arena.centerX,
-          y: this.arena.centerY - 46,
+          x: this.arena.castleX - 10,
+          y: this.arena.castleY - 58,
           vy: -36,
-          text: `-${enemy.damage}`,
+          text: `-${enemy.damage} HP`,
           color: '#FCA5A5',
           scale: 1.2,
-          life: 0.85,
-          maxLife: 0.85,
+          life: 0.9,
+          maxLife: 0.9,
         });
         this.enemies.splice(i, 1);
 
@@ -1140,7 +1093,7 @@ export class GameSimulation {
       const dx = target.x - unit.x;
       const dy = target.y - unit.y;
       const dist = Math.hypot(dx, dy) || 1;
-      const speed = 520;
+      const speed = 540;
       this.projectiles.push({
         id: this.nextEntityId++,
         x: unit.x + (dx / dist) * 18,
@@ -1161,20 +1114,20 @@ export class GameSimulation {
       const dx = target.x - unit.x;
       const dy = target.y - unit.y;
       const dist = Math.hypot(dx, dy) || 1;
-      const speed = 340;
+      const speed = 350;
       this.projectiles.push({
         id: this.nextEntityId++,
         x: unit.x + (dx / dist) * 20,
         y: unit.y + (dy / dist) * 20,
         vx: (dx / dist) * speed,
         vy: (dy / dist) * speed,
-        radius: 15 + (unit.level - 1) * 3,
+        radius: 16 + (unit.level - 1) * 3,
         damage: unit.damage,
         critChance: unit.critChance,
         color: unit.level >= 2 ? '#38BDF8' : '#60A5FA',
         trailColor: '#DBEAFE',
         targetEnemyId: target.id,
-        life: 0.48,
+        life: 0.55,
         isShockwave: true,
       });
       soundEngine.playShieldBash();
@@ -1197,14 +1150,12 @@ export class GameSimulation {
         unit.y,
         unit.facingAngle,
         slashRadius,
-        Math.PI * 0.54,
+        Math.PI * 0.58,
         this.enemies
       );
       for (const enemy of hitEnemies) {
         const roll = rollCriticalHit(unit.damage, unit.critChance);
-        const kx = Math.cos(unit.facingAngle) * 75;
-        const ky = Math.sin(unit.facingAngle) * 75;
-        this.handleEnemyDamaged(enemy, roll.damage, kx, ky, true, roll.isCrit);
+        this.handleEnemyDamaged(enemy, roll.damage, 0, 0, true, roll.isCrit);
       }
       this.spawnTypedParticles(
         unit.x + Math.cos(unit.facingAngle) * 44,
@@ -1229,8 +1180,8 @@ export class GameSimulation {
     const res = applyDamageToEnemy(enemy, damage);
     if (res.actualDamage <= 0) return;
 
-    enemy.knockbackVx += knockX * (enemy.kind === 'boss' ? 0.28 : 1);
-    enemy.knockbackVy += knockY * (enemy.kind === 'boss' ? 0.28 : 1);
+    enemy.knockbackVx += knockX * (enemy.kind === 'boss' ? 0.25 : 1);
+    enemy.knockbackVy += knockY * (enemy.kind === 'boss' ? 0.25 : 1);
 
     if (isCrit) {
       this.spawnTypedParticles(enemy.x, enemy.y, 7, 'spark', '#FB923C', 145, 0.32);
@@ -1260,7 +1211,6 @@ export class GameSimulation {
       this.cameraTrauma = Math.min(1, this.cameraTrauma + (enemy.kind === 'boss' ? 0.65 : isCrit ? 0.24 : 0.14));
       soundEngine.playKill();
 
-      // Smoke, cut grass, and metallic sparks on enemy destruction
       const burstScale = enemy.kind === 'boss' ? 2 : 1;
       this.spawnTypedParticles(enemy.x, enemy.y, 8 * burstScale, 'smoke', '#CBD5E1', 90, 0.52);
       this.spawnTypedParticles(enemy.x, enemy.y, 7 * burstScale, 'grass', '#84CC16', 135, 0.42);
@@ -1297,7 +1247,7 @@ export class GameSimulation {
       const sw = this.shockwaves[i];
       sw.life -= dt;
       const progress = 1 - Math.max(0, sw.life / sw.maxLife);
-      sw.currentRadius = this.arena.coreRadius + (sw.maxRadius - this.arena.coreRadius) * progress;
+      sw.currentRadius = this.arena.castleRadius + (sw.maxRadius - this.arena.castleRadius) * progress;
       if (sw.life <= 0) this.shockwaves.splice(i, 1);
     }
 

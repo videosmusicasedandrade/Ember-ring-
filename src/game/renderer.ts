@@ -7,7 +7,7 @@ export class ArenaRenderer {
   private staticArenaKey = '';
 
   private ensureStaticLayer(arena: ArenaConfig): HTMLCanvasElement {
-    const key = `${arena.worldWidth}x${arena.worldHeight}`;
+    const key = `${arena.worldWidth}x${arena.worldHeight}-route-v2`;
     if (this.staticCanvas && this.staticArenaKey === key) {
       return this.staticCanvas;
     }
@@ -22,133 +22,244 @@ export class ArenaRenderer {
     return canvas;
   }
 
+  private traceRoutePath(ctx: CanvasRenderingContext2D, arena: ArenaConfig) {
+    const wps = arena.waypoints;
+    if (wps.length === 0) return;
+    ctx.beginPath();
+    ctx.moveTo(wps[0].x, wps[0].y);
+    for (let i = 1; i < wps.length; i++) {
+      ctx.lineTo(wps[i].x, wps[i].y);
+    }
+  }
+
   private drawStaticWorld(ctx: CanvasRenderingContext2D, arena: ArenaConfig) {
     const { worldWidth: w, worldHeight: h, centerX: cx, centerY: cy } = arena;
 
-    const bgGrad = ctx.createRadialGradient(cx, cy, 80, cx, cy, 405);
-    bgGrad.addColorStop(0, '#85CC47');
-    bgGrad.addColorStop(0.65, '#72B93B');
-    bgGrad.addColorStop(1, '#5DA430');
+    // 1. Clean layered modern meadow gradient
+    const bgGrad = ctx.createRadialGradient(cx, cy, 90, cx, cy, 690);
+    bgGrad.addColorStop(0, '#78C94D');
+    bgGrad.addColorStop(0.58, '#61AF39');
+    bgGrad.addColorStop(1, '#4A8E29');
     ctx.fillStyle = bgGrad;
     ctx.fillRect(0, 0, w, h);
 
-    const grassPatches = [
-      { x: 180, y: 220, r: 58 },
-      { x: 980, y: 260, r: 64 },
-      { x: 210, y: 650, r: 54 },
-      { x: 1010, y: 610, r: 68 },
-      { x: 420, y: 120, r: 44 },
-      { x: 820, y: 720, r: 52 },
+    // Subtle sunlit grass terraces for depth without clutter
+    const meadows = [
+      { x: 240, y: 390, rx: 160, ry: 110 },
+      { x: 640, y: 380, rx: 190, ry: 145 },
+      { x: 960, y: 420, rx: 145, ry: 130 },
+      { x: 430, y: 580, rx: 140, ry: 85 },
     ];
-    ctx.fillStyle = 'rgba(155, 224, 84, 0.28)';
-    for (const p of grassPatches) {
+    ctx.fillStyle = 'rgba(170, 232, 102, 0.2)';
+    for (const m of meadows) {
       ctx.beginPath();
-      ctx.ellipse(p.x, p.y, p.r, p.r * 0.68, 0, 0, Math.PI * 2);
+      ctx.ellipse(m.x, m.y, m.rx, m.ry, 0, 0, Math.PI * 2);
       ctx.fill();
     }
 
+    // Scenic decorative pond in calm bottom-left meadow
+    this.drawScenicPond(ctx, 130, 660);
+
+    // Subtle grass tufts & wildflowers outside road
     const tufts = [
-      [140, 310], [260, 175], [960, 195], [1075, 420],
-      [145, 510], [280, 720], [925, 675], [1065, 545],
-      [360, 75], [845, 95], [475, 765], [755, 745],
+      [145, 135], [325, 135], [630, 135], [885, 145],
+      [115, 420], [115, 550], [295, 665], [585, 675],
+      [830, 675], [1085, 645], [1110, 225], [755, 130],
     ];
     for (const [tx, ty] of tufts) {
       this.drawGrassTuft(ctx, tx, ty);
     }
 
-    this.drawPebble(ctx, 250, 710, 16, 10, '#D6D3C9');
-    this.drawPebble(ctx, 282, 724, 11, 7, '#C5C2B7');
-    this.drawSignpost(ctx, 200, 668);
+    // Pebbles & wooden trail signpost near portal
+    this.drawPebble(ctx, 250, 675, 15, 9, '#CBD5E1');
+    this.drawPebble(ctx, 278, 690, 10, 6, '#94A3B8');
+    this.drawSignpost(ctx, 146, 336);
 
+    // 2. Winding Cobblestone / Sandstone Route
+    const roadW = arena.roadHalfWidth * 2;
     ctx.save();
-    ctx.fillStyle = 'rgba(35, 68, 18, 0.22)';
-    ctx.beginPath();
-    ctx.arc(cx, cy + 7, arena.outerTrackRadius + 8, 0, Math.PI * 2);
-    ctx.fill();
+    ctx.lineCap = 'round';
+    ctx.lineJoin = 'round';
 
-    ctx.fillStyle = '#C9A84C';
-    ctx.beginPath();
-    const lobes = 44;
-    for (let i = 0; i <= lobes * 4; i++) {
-      const a = (i / (lobes * 4)) * Math.PI * 2;
-      const wobble = Math.sin(a * lobes) * 4.5 + Math.cos(a * 17) * 2;
-      const r = arena.outerTrackRadius + 4 + wobble;
-      const px = cx + Math.cos(a) * r;
-      const py = cy + Math.sin(a) * r;
-      if (i === 0) ctx.moveTo(px, py);
-      else ctx.lineTo(px, py);
-    }
-    ctx.closePath();
-    ctx.fill();
-
-    const trackGrad = ctx.createRadialGradient(cx, cy, arena.innerGrassRadius, cx, cy, arena.outerTrackRadius);
-    trackGrad.addColorStop(0, '#E8C762');
-    trackGrad.addColorStop(0.6, '#F4DB80');
-    trackGrad.addColorStop(1, '#E2BE57');
-    ctx.fillStyle = trackGrad;
-    ctx.beginPath();
-    ctx.arc(cx, cy, arena.outerTrackRadius - 2, 0, Math.PI * 2);
-    ctx.fill();
-
-    for (let i = 0; i < 24; i++) {
-      const a = (i / 24) * Math.PI * 2 + 0.2;
-      const r = arena.innerGrassRadius + 24 + ((i * 37) % 42);
-      ctx.fillStyle = i % 2 === 0 ? 'rgba(180, 140, 48, 0.28)' : 'rgba(255, 248, 210, 0.35)';
-      ctx.beginPath();
-      ctx.ellipse(cx + Math.cos(a) * r, cy + Math.sin(a) * r, 6, 3.5, a, 0, Math.PI * 2);
-      ctx.fill();
-    }
-
-    ctx.fillStyle = '#B8973D';
-    ctx.beginPath();
-    ctx.arc(cx, cy, arena.innerGrassRadius + 3, 0, Math.PI * 2);
-    ctx.fill();
-
-    const innerGrad = ctx.createRadialGradient(cx, cy, 30, cx, cy, arena.innerGrassRadius);
-    innerGrad.addColorStop(0, '#6EB03C');
-    innerGrad.addColorStop(1, '#58972D');
-    ctx.fillStyle = innerGrad;
-    ctx.beginPath();
-    ctx.arc(cx, cy, arena.innerGrassRadius, 0, Math.PI * 2);
-    ctx.fill();
-
-    ctx.strokeStyle = 'rgba(182, 232, 102, 0.24)';
-    ctx.lineWidth = 2;
-    ctx.setLineDash([8, 8]);
-    for (const ringR of [102, 184]) {
-      ctx.beginPath();
-      ctx.arc(cx, cy, ringR, 0, Math.PI * 2);
-      ctx.stroke();
-    }
-    ctx.setLineDash([]);
+    // Ground drop shadow
+    ctx.save();
+    ctx.translate(0, 7);
+    this.traceRoutePath(ctx, arena);
+    ctx.strokeStyle = 'rgba(20, 48, 12, 0.24)';
+    ctx.lineWidth = roadW + 14;
+    ctx.stroke();
     ctx.restore();
 
-    this.drawCamperVan(ctx, 132, 82);
-    this.drawCampChairs(ctx, cx - 210, 82);
-    this.drawStoneHut(ctx, w - 135, 86);
+    // Dark stone border outline
+    this.traceRoutePath(ctx, arena);
+    ctx.strokeStyle = '#8F703B';
+    ctx.lineWidth = roadW + 12;
+    ctx.stroke();
+
+    // Warm sandstone curb trim
+    this.traceRoutePath(ctx, arena);
+    ctx.strokeStyle = '#C7A35A';
+    ctx.lineWidth = roadW + 6;
+    ctx.stroke();
+
+    // Main sunlit path surface
+    this.traceRoutePath(ctx, arena);
+    ctx.strokeStyle = '#EBD082';
+    ctx.lineWidth = roadW;
+    ctx.stroke();
+
+    // Inner worn center track
+    this.traceRoutePath(ctx, arena);
+    ctx.strokeStyle = '#F5E19E';
+    ctx.lineWidth = roadW * 0.56;
+    ctx.stroke();
+
+    // Stylized stepping stones & subtle directional chevrons along each segment
+    const wps = arena.waypoints;
+    for (let i = 0; i < wps.length - 1; i++) {
+      const a = wps[i];
+      const b = wps[i + 1];
+      const dx = b.x - a.x;
+      const dy = b.y - a.y;
+      const segLen = Math.hypot(dx, dy);
+      const ang = Math.atan2(dy, dx);
+      if (segLen < 35) continue;
+
+      const steps = Math.max(1, Math.floor(segLen / 54));
+      for (let s = 1; s <= steps; s++) {
+        const t = s / (steps + 1);
+        const px = a.x + dx * t;
+        const py = a.y + dy * t;
+
+        // Subtle stone speckle
+        const perpX = (-dy / segLen) * ((s % 2 === 0 ? 1 : -1) * 14);
+        const perpY = (dx / segLen) * ((s % 2 === 0 ? 1 : -1) * 14);
+        ctx.fillStyle = 'rgba(181, 141, 68, 0.25)';
+        ctx.beginPath();
+        ctx.ellipse(px + perpX, py + perpY, 6, 4, ang, 0, Math.PI * 2);
+        ctx.fill();
+
+        // Subtle inlaid chevron arrow pointing along route
+        if (s % 2 === 1) {
+          ctx.save();
+          ctx.translate(px, py);
+          ctx.rotate(ang);
+          ctx.strokeStyle = 'rgba(161, 118, 44, 0.34)';
+          ctx.lineWidth = 3;
+          ctx.beginPath();
+          ctx.moveTo(-5, -7);
+          ctx.lineTo(4, 0);
+          ctx.lineTo(-5, 7);
+          ctx.stroke();
+          ctx.restore();
+        }
+      }
+    }
+    ctx.restore();
+
+    // 3. Perimeter foliage & minimalist pine trees framing the map edges
+    const shrubs = [
+      { x: 64, y: 180, r: 22 },
+      { x: 380, y: 98, r: 24 },
+      { x: 770, y: 95, r: 22 },
+      { x: 1135, y: 205, r: 24 },
+      { x: 1140, y: 580, r: 22 },
+      { x: 560, y: 720, r: 24 },
+      { x: 840, y: 715, r: 22 },
+    ];
+    for (const s of shrubs) {
+      this.drawRoundedBush(ctx, s.x, s.y, s.r);
+    }
 
     const trees = [
-      { x: 48, y: 175, s: 1.0 },
-      { x: 75, y: 270, s: 0.85 },
-      { x: 45, y: 585, s: 0.92 },
-      { x: 86, y: 745, s: 1.1 },
-      { x: 162, y: 780, s: 0.86 },
-      { x: w - 55, y: 205, s: 1.05 },
-      { x: w - 65, y: 590, s: 0.95 },
-      { x: w - 105, y: 745, s: 1.12 },
-      { x: w - 210, y: 775, s: 0.88 },
-      { x: 265, y: 52, s: 0.82 },
-      { x: w - 285, y: 48, s: 0.85 },
+      { x: 52, y: 120, s: 0.98 },
+      { x: 52, y: 380, s: 0.88 },
+      { x: 55, y: 515, s: 0.94 },
+      { x: 72, y: 745, s: 1.05 },
+      { x: 210, y: 760, s: 0.86 },
+      { x: 1142, y: 130, s: 1.02 },
+      { x: 1145, y: 320, s: 0.85 },
+      { x: 1138, y: 660, s: 1.05 },
+      { x: 1030, y: 745, s: 0.92 },
+      { x: 220, y: 62, s: 0.82 },
+      { x: 960, y: 68, s: 0.86 },
     ];
     for (const t of trees) {
       this.drawPineTree(ctx, t.x, t.y, t.s);
     }
   }
 
+  private drawScenicPond(ctx: CanvasRenderingContext2D, x: number, y: number) {
+    ctx.save();
+    ctx.translate(x, y);
+    ctx.fillStyle = 'rgba(20, 48, 14, 0.2)';
+    ctx.beginPath();
+    ctx.ellipse(0, 5, 58, 30, -0.15, 0, Math.PI * 2);
+    ctx.fill();
+
+    ctx.fillStyle = '#B8AD96';
+    ctx.strokeStyle = '#4B5563';
+    ctx.lineWidth = 2.5;
+    ctx.beginPath();
+    ctx.ellipse(0, 0, 54, 27, -0.15, 0, Math.PI * 2);
+    ctx.fill();
+    ctx.stroke();
+
+    const waterGrad = ctx.createLinearGradient(-40, -18, 40, 18);
+    waterGrad.addColorStop(0, '#38BDF8');
+    waterGrad.addColorStop(1, '#0284C7');
+    ctx.fillStyle = waterGrad;
+    ctx.beginPath();
+    ctx.ellipse(0, 0, 46, 21, -0.15, 0, Math.PI * 2);
+    ctx.fill();
+
+    // Lilypad
+    ctx.fillStyle = '#4ADE80';
+    ctx.strokeStyle = '#166534';
+    ctx.lineWidth = 1.6;
+    ctx.beginPath();
+    ctx.arc(16, 4, 8, 0.4, Math.PI * 2 - 0.3);
+    ctx.lineTo(16, 4);
+    ctx.closePath();
+    ctx.fill();
+    ctx.stroke();
+
+    ctx.fillStyle = 'rgba(255,255,255,0.45)';
+    ctx.beginPath();
+    ctx.ellipse(-18, -7, 13, 3.5, -0.2, 0, Math.PI * 2);
+    ctx.fill();
+    ctx.restore();
+  }
+
+  private drawRoundedBush(ctx: CanvasRenderingContext2D, x: number, y: number, r: number) {
+    ctx.save();
+    ctx.translate(x, y);
+    ctx.fillStyle = 'rgba(20, 46, 14, 0.24)';
+    ctx.beginPath();
+    ctx.ellipse(0, r * 0.52, r * 1.15, r * 0.45, 0, 0, Math.PI * 2);
+    ctx.fill();
+
+    ctx.fillStyle = '#2F7D32';
+    ctx.strokeStyle = '#18441B';
+    ctx.lineWidth = 2.4;
+    ctx.beginPath();
+    ctx.arc(-r * 0.45, 2, r * 0.62, 0, Math.PI * 2);
+    ctx.arc(r * 0.45, 2, r * 0.62, 0, Math.PI * 2);
+    ctx.arc(0, -r * 0.24, r * 0.78, 0, Math.PI * 2);
+    ctx.fill();
+    ctx.stroke();
+
+    ctx.fillStyle = '#4ADE80';
+    ctx.beginPath();
+    ctx.arc(-r * 0.12, -r * 0.34, r * 0.38, 0, Math.PI * 2);
+    ctx.fill();
+    ctx.restore();
+  }
+
   private drawGrassTuft(ctx: CanvasRenderingContext2D, x: number, y: number) {
     ctx.save();
-    ctx.strokeStyle = '#4A8924';
-    ctx.lineWidth = 2.5;
+    ctx.strokeStyle = '#3B781C';
+    ctx.lineWidth = 2.4;
     ctx.lineCap = 'round';
     ctx.beginPath();
     ctx.moveTo(x - 6, y);
@@ -161,11 +272,11 @@ export class ArenaRenderer {
 
     ctx.fillStyle = '#FEF9C3';
     ctx.beginPath();
-    ctx.arc(x + 16, y - 4, 3.5, 0, Math.PI * 2);
+    ctx.arc(x + 15, y - 4, 3.3, 0, Math.PI * 2);
     ctx.fill();
     ctx.fillStyle = '#F59E0B';
     ctx.beginPath();
-    ctx.arc(x + 16, y - 4, 1.5, 0, Math.PI * 2);
+    ctx.arc(x + 15, y - 4, 1.5, 0, Math.PI * 2);
     ctx.fill();
     ctx.restore();
   }
@@ -177,7 +288,7 @@ export class ArenaRenderer {
     ctx.ellipse(x, y + 3, rx, ry, 0, 0, Math.PI * 2);
     ctx.fill();
     ctx.fillStyle = color;
-    ctx.strokeStyle = '#52524B';
+    ctx.strokeStyle = '#475569';
     ctx.lineWidth = 2;
     ctx.beginPath();
     ctx.ellipse(x, y, rx, ry, 0, 0, Math.PI * 2);
@@ -190,22 +301,22 @@ export class ArenaRenderer {
     ctx.save();
     ctx.fillStyle = 'rgba(28, 48, 16, 0.25)';
     ctx.beginPath();
-    ctx.ellipse(x, y + 26, 18, 7, 0, 0, Math.PI * 2);
+    ctx.ellipse(x, y + 25, 16, 6.5, 0, 0, Math.PI * 2);
     ctx.fill();
     ctx.fillStyle = '#8B5A2B';
     ctx.strokeStyle = '#3B2313';
-    ctx.lineWidth = 2.5;
+    ctx.lineWidth = 2.4;
     ctx.beginPath();
-    ctx.roundRect(x - 4, y - 24, 8, 50, 3);
+    ctx.roundRect(x - 4, y - 22, 8, 46, 3);
     ctx.fill();
     ctx.stroke();
-    ctx.fillStyle = '#D99B52';
+    ctx.fillStyle = '#E0A153';
     ctx.beginPath();
-    ctx.moveTo(x - 20, y - 18);
-    ctx.lineTo(x + 16, y - 18);
-    ctx.lineTo(x + 25, y - 11);
-    ctx.lineTo(x + 16, y - 4);
-    ctx.lineTo(x - 20, y - 4);
+    ctx.moveTo(x - 18, y - 17);
+    ctx.lineTo(x + 16, y - 17);
+    ctx.lineTo(x + 24, y - 10);
+    ctx.lineTo(x + 16, y - 3);
+    ctx.lineTo(x - 18, y - 3);
     ctx.closePath();
     ctx.fill();
     ctx.stroke();
@@ -216,27 +327,27 @@ export class ArenaRenderer {
     ctx.save();
     ctx.translate(x, y);
     ctx.scale(scale, scale);
-    ctx.fillStyle = 'rgba(20, 46, 14, 0.28)';
+    ctx.fillStyle = 'rgba(20, 46, 14, 0.26)';
     ctx.beginPath();
     ctx.ellipse(0, 18, 28, 11, 0, 0, Math.PI * 2);
     ctx.fill();
 
     ctx.fillStyle = '#6D4325';
     ctx.strokeStyle = '#2B1A0D';
-    ctx.lineWidth = 2.5;
+    ctx.lineWidth = 2.4;
     ctx.beginPath();
     ctx.roundRect(-6, 4, 12, 16, 3);
     ctx.fill();
     ctx.stroke();
 
     const layers = [
-      { y: 6, w: 30, h: 36, fill: '#2B6E3F' },
-      { y: -14, w: 23, h: 32, fill: '#37874D' },
+      { y: 6, w: 30, h: 36, fill: '#286C3D' },
+      { y: -14, w: 23, h: 32, fill: '#35884E' },
     ];
     for (const l of layers) {
       ctx.fillStyle = l.fill;
-      ctx.strokeStyle = '#194025';
-      ctx.lineWidth = 2.5;
+      ctx.strokeStyle = '#173E23';
+      ctx.lineWidth = 2.4;
       ctx.beginPath();
       ctx.moveTo(0, l.y - l.h);
       ctx.lineTo(l.w, l.y);
@@ -245,97 +356,6 @@ export class ArenaRenderer {
       ctx.fill();
       ctx.stroke();
     }
-    ctx.restore();
-  }
-
-  private drawCamperVan(ctx: CanvasRenderingContext2D, x: number, y: number) {
-    ctx.save();
-    ctx.translate(x, y);
-    ctx.rotate(-0.14);
-
-    ctx.fillStyle = 'rgba(20, 46, 14, 0.25)';
-    ctx.beginPath();
-    ctx.ellipse(0, 26, 48, 16, 0, 0, Math.PI * 2);
-    ctx.fill();
-
-    ctx.fillStyle = '#DC2626';
-    ctx.strokeStyle = '#271717';
-    ctx.lineWidth = 3;
-    ctx.beginPath();
-    ctx.roundRect(-42, -18, 84, 42, 12);
-    ctx.fill();
-    ctx.stroke();
-
-    ctx.fillStyle = '#FEF3C7';
-    ctx.beginPath();
-    ctx.roundRect(-38, -28, 76, 24, 10);
-    ctx.fill();
-    ctx.stroke();
-
-    ctx.fillStyle = '#60A5FA';
-    ctx.beginPath();
-    ctx.roundRect(-28, -22, 56, 14, 5);
-    ctx.fill();
-    ctx.stroke();
-
-    ctx.fillStyle = '#F59E0B';
-    ctx.beginPath();
-    ctx.roundRect(-20, -40, 40, 14, 5);
-    ctx.fill();
-    ctx.stroke();
-    ctx.restore();
-  }
-
-  private drawCampChairs(ctx: CanvasRenderingContext2D, x: number, y: number) {
-    ctx.save();
-    ctx.translate(x, y);
-    ctx.fillStyle = '#8B5A2B';
-    ctx.strokeStyle = '#2C1B0E';
-    ctx.lineWidth = 2.5;
-    ctx.beginPath();
-    ctx.roundRect(-14, -8, 28, 18, 5);
-    ctx.fill();
-    ctx.stroke();
-    for (const ox of [-34, 34]) {
-      ctx.fillStyle = '#2563EB';
-      ctx.beginPath();
-      ctx.roundRect(ox - 12, -12, 24, 22, 6);
-      ctx.fill();
-      ctx.stroke();
-    }
-    ctx.restore();
-  }
-
-  private drawStoneHut(ctx: CanvasRenderingContext2D, x: number, y: number) {
-    ctx.save();
-    ctx.translate(x, y);
-    ctx.fillStyle = 'rgba(20, 46, 14, 0.25)';
-    ctx.beginPath();
-    ctx.ellipse(0, 26, 48, 16, 0, 0, Math.PI * 2);
-    ctx.fill();
-
-    ctx.fillStyle = '#D6D3D1';
-    ctx.strokeStyle = '#292524';
-    ctx.lineWidth = 3;
-    ctx.beginPath();
-    ctx.arc(0, 12, 42, Math.PI, 0);
-    ctx.lineTo(42, 24);
-    ctx.lineTo(-42, 24);
-    ctx.closePath();
-    ctx.fill();
-    ctx.stroke();
-
-    ctx.fillStyle = '#EA580C';
-    ctx.beginPath();
-    ctx.arc(0, 22, 14, Math.PI, 0);
-    ctx.closePath();
-    ctx.fill();
-    ctx.stroke();
-    ctx.fillStyle = '#FDE047';
-    ctx.beginPath();
-    ctx.arc(0, 20, 7, Math.PI, 0);
-    ctx.closePath();
-    ctx.fill();
     ctx.restore();
   }
 
@@ -352,7 +372,7 @@ export class ArenaRenderer {
 
     ctx.drawImage(staticLayer, 0, 0);
 
-    // 2. Dotted Transparent Circular Positioning Slots
+    // 2. Strategic Tactical Defender Pad Slots beside the route
     const drag = sim.dragState;
     const draggedUnit =
       drag && drag.source === 'unit' && drag.unitId
@@ -372,11 +392,17 @@ export class ArenaRenderer {
       );
 
       ctx.save();
+      // Subtle plinth drop shadow
+      ctx.fillStyle = 'rgba(20, 42, 14, 0.22)';
+      ctx.beginPath();
+      ctx.ellipse(slot.x, slot.y + 4, slot.radius + 2, slot.radius * 0.88 + 2, 0, 0, Math.PI * 2);
+      ctx.fill();
+
       ctx.beginPath();
       ctx.arc(slot.x, slot.y, slot.radius, 0, Math.PI * 2);
 
       if (isMergeCandidate) {
-        const pulse = 0.32 + Math.sin(sim.time * 10) * 0.14;
+        const pulse = 0.34 + Math.sin(sim.time * 10) * 0.14;
         ctx.fillStyle = `rgba(250, 204, 21, ${pulse})`;
         ctx.fill();
         ctx.lineWidth = isHovered ? 4 : 3;
@@ -384,19 +410,29 @@ export class ArenaRenderer {
         ctx.stroke();
       } else {
         ctx.fillStyle = isHovered
-          ? 'rgba(217, 249, 157, 0.32)'
+          ? 'rgba(217, 249, 157, 0.42)'
           : isEmpty
-            ? 'rgba(155, 218, 72, 0.18)'
-            : 'rgba(84, 150, 38, 0.25)';
+            ? 'rgba(54, 98, 28, 0.32)'
+            : 'rgba(42, 76, 22, 0.45)';
         ctx.fill();
 
-        ctx.lineWidth = isHovered ? 3 : 2;
-        ctx.strokeStyle = isHovered ? '#FEF08A' : 'rgba(190, 242, 100, 0.78)';
+        ctx.lineWidth = isHovered ? 3 : 2.2;
+        ctx.strokeStyle = isHovered
+          ? '#FEF08A'
+          : isEmpty
+            ? 'rgba(217, 249, 157, 0.85)'
+            : 'rgba(163, 230, 53, 0.55)';
         if (isEmpty && !isHovered) {
-          ctx.setLineDash([5, 5]);
+          ctx.setLineDash([6, 5]);
         }
         ctx.stroke();
         ctx.setLineDash([]);
+
+        if (isEmpty) {
+          ctx.fillStyle = 'rgba(236, 252, 203, 0.45)';
+          ctx.fillRect(slot.x - 6, slot.y - 1.5, 12, 3);
+          ctx.fillRect(slot.x - 1.5, slot.y - 6, 3, 12);
+        }
       }
 
       if (isHovered && isEmpty && !drag && !sim.spells.targetingSpell) {
@@ -406,7 +442,7 @@ export class ArenaRenderer {
       ctx.restore();
     }
 
-    // 2.5 Shockwave Ring Effects (behind actors)
+    // 2.5 Shockwave Ring Effects (radiating from Castle)
     for (const sw of sim.shockwaves) {
       const alpha = Math.max(0, sw.life / sw.maxLife);
       ctx.save();
@@ -425,8 +461,9 @@ export class ArenaRenderer {
       ctx.restore();
     }
 
-    // 3. Central Base (Campfire + Glowing Flame Egg / Core)
-    this.drawCentralBase(ctx, sim);
+    // 3. West Invasion Portal Gate & East Fortress Castle
+    this.drawSpawnPortal(ctx, sim);
+    this.drawCastleBase(ctx, sim);
 
     // 4. Depth-sorted actors
     type RenderItem =
@@ -521,7 +558,7 @@ export class ArenaRenderer {
     for (const proj of sim.projectiles) {
       ctx.save();
       if (proj.isShockwave) {
-        ctx.fillStyle = 'rgba(96, 165, 250, 0.35)';
+        ctx.fillStyle = 'rgba(96, 165, 250, 0.38)';
         ctx.strokeStyle = '#EFF6FF';
         ctx.lineWidth = 3;
         ctx.beginPath();
@@ -545,7 +582,7 @@ export class ArenaRenderer {
       ctx.restore();
     }
 
-    // 9. Pooled Typed Particles (smoke, cut grass, metallic sparks, circles)
+    // 9. Pooled Typed Particles
     for (let i = 0; i < sim.particles.length; i++) {
       const p = sim.particles[i];
       if (!p.active) continue;
@@ -577,12 +614,12 @@ export class ArenaRenderer {
       ctx.restore();
     }
 
-    // 10. Subtle Directional Horde Warning Arrows along perimeter
+    // 10. Route Entrance Warning Arrow
     for (const warn of sim.hordeWarnings) {
       this.drawHordeWarningArrow(
         ctx,
-        arena.centerX,
-        arena.centerY,
+        warn.x + 36,
+        warn.y,
         warn.angle,
         warn.timer,
         sim.time,
@@ -609,25 +646,216 @@ export class ArenaRenderer {
     ctx.restore();
   }
 
+  private drawSpawnPortal(ctx: CanvasRenderingContext2D, sim: GameSimulation) {
+    const start = sim.arena.waypoints[0] ?? { x: 96, y: 265 };
+    const pulse = Math.sin(sim.time * 4.5) * 2.5;
+
+    ctx.save();
+    ctx.translate(start.x, start.y);
+
+    // Shadow
+    ctx.fillStyle = 'rgba(15, 23, 42, 0.3)';
+    ctx.beginPath();
+    ctx.ellipse(0, 26, 36, 12, 0, 0, Math.PI * 2);
+    ctx.fill();
+
+    // Stone archway pillars
+    ctx.fillStyle = '#475569';
+    ctx.strokeStyle = '#0F172A';
+    ctx.lineWidth = 3;
+    ctx.beginPath();
+    ctx.roundRect(-28, -32, 56, 56, 18);
+    ctx.fill();
+    ctx.stroke();
+
+    // Inner glowing rift
+    const riftGrad = ctx.createRadialGradient(0, -2, 4, 0, -2, 24 + pulse);
+    riftGrad.addColorStop(0, '#F5D0FE');
+    riftGrad.addColorStop(0.55, '#A855F7');
+    riftGrad.addColorStop(1, '#4C1D95');
+    ctx.fillStyle = riftGrad;
+    ctx.beginPath();
+    ctx.ellipse(0, -1, 18, 22, 0, 0, Math.PI * 2);
+    ctx.fill();
+    ctx.strokeStyle = '#3B0764';
+    ctx.lineWidth = 2.5;
+    ctx.stroke();
+
+    // Label
+    ctx.font = '800 11px "Plus Jakarta Sans", sans-serif';
+    ctx.textAlign = 'center';
+    ctx.lineWidth = 3.5;
+    ctx.strokeStyle = '#0F172A';
+    ctx.strokeText('HORDA', 0, -40);
+    ctx.fillStyle = '#E9D5FF';
+    ctx.fillText('HORDA', 0, -40);
+
+    ctx.restore();
+  }
+
+  private drawCastleBase(ctx: CanvasRenderingContext2D, sim: GameSimulation) {
+    const { castleX: cx, castleY: cy } = sim.arena;
+    const hitFlash = sim.baseHitFlash > 0;
+    const overcharged = sim.spells.overchargeTimer > 0;
+    const waveFlag = Math.sin(sim.time * 5.2) * 3;
+
+    ctx.save();
+    ctx.translate(cx, cy);
+
+    // Soft castle ground shadow
+    ctx.fillStyle = 'rgba(18, 36, 12, 0.34)';
+    ctx.beginPath();
+    ctx.ellipse(0, 40, 62, 20, 0, 0, Math.PI * 2);
+    ctx.fill();
+
+    // Overcharge aura or Hit warning glow
+    if (overcharged || hitFlash) {
+      ctx.strokeStyle = hitFlash ? 'rgba(239, 68, 68, 0.85)' : '#FDE047';
+      ctx.lineWidth = 4;
+      ctx.beginPath();
+      ctx.ellipse(0, 12, 66 + Math.sin(sim.time * 10) * 3, 52, 0, 0, Math.PI * 2);
+      ctx.stroke();
+    }
+
+    const wallColor = hitFlash ? '#FCA5A5' : '#E2E8F0';
+    const wallShade = hitFlash ? '#EF4444' : '#94A3B8';
+    const roofColor = hitFlash ? '#DC2626' : '#2563EB';
+    const outline = '#1E293B';
+
+    // Rear central keep tower
+    ctx.fillStyle = wallShade;
+    ctx.strokeStyle = outline;
+    ctx.lineWidth = 3;
+    ctx.beginPath();
+    ctx.roundRect(-24, -46, 48, 56, 6);
+    ctx.fill();
+    ctx.stroke();
+
+    // Keep conical roof
+    ctx.fillStyle = roofColor;
+    ctx.beginPath();
+    ctx.moveTo(0, -76);
+    ctx.lineTo(29, -42);
+    ctx.lineTo(-29, -42);
+    ctx.closePath();
+    ctx.fill();
+    ctx.stroke();
+
+    // Fluttering golden banner on keep spire
+    ctx.strokeStyle = '#78350F';
+    ctx.lineWidth = 2.5;
+    ctx.beginPath();
+    ctx.moveTo(0, -76);
+    ctx.lineTo(0, -94);
+    ctx.stroke();
+
+    ctx.fillStyle = '#FACC15';
+    ctx.strokeStyle = '#422006';
+    ctx.lineWidth = 2;
+    ctx.beginPath();
+    ctx.moveTo(1, -93);
+    ctx.quadraticCurveTo(13, -95 + waveFlag, 24, -88 + waveFlag * 0.6);
+    ctx.lineTo(18, -84 + waveFlag * 0.4);
+    ctx.lineTo(24, -80 + waveFlag * 0.6);
+    ctx.lineTo(1, -82);
+    ctx.closePath();
+    ctx.fill();
+    ctx.stroke();
+
+    // Main stone curtain wall & battlements
+    ctx.fillStyle = wallColor;
+    ctx.strokeStyle = outline;
+    ctx.lineWidth = 3;
+    ctx.beginPath();
+    ctx.roundRect(-42, -16, 84, 52, 8);
+    ctx.fill();
+    ctx.stroke();
+
+    // Battlement merlons
+    for (const mx of [-32, -14, 4, 22]) {
+      ctx.fillStyle = wallColor;
+      ctx.beginPath();
+      ctx.roundRect(mx, -24, 12, 10, 2);
+      ctx.fill();
+      ctx.stroke();
+    }
+
+    // Twin front flanking watchtowers
+    for (const tx of [-44, 44]) {
+      ctx.fillStyle = wallShade;
+      ctx.beginPath();
+      ctx.roundRect(tx - 13, -24, 26, 60, 6);
+      ctx.fill();
+      ctx.stroke();
+
+      ctx.fillStyle = roofColor;
+      ctx.beginPath();
+      ctx.moveTo(tx, -46);
+      ctx.lineTo(tx + 17, -22);
+      ctx.lineTo(tx - 17, -22);
+      ctx.closePath();
+      ctx.fill();
+      ctx.stroke();
+    }
+
+    // Arched oak-and-iron Castle Gate
+    ctx.fillStyle = '#78350F';
+    ctx.strokeStyle = outline;
+    ctx.lineWidth = 2.8;
+    ctx.beginPath();
+    ctx.arc(0, 14, 15, Math.PI, 0);
+    ctx.lineTo(15, 36);
+    ctx.lineTo(-15, 36);
+    ctx.closePath();
+    ctx.fill();
+    ctx.stroke();
+
+    // Gate iron studs & golden crest
+    ctx.strokeStyle = '#451A03';
+    ctx.lineWidth = 2;
+    ctx.beginPath();
+    ctx.moveTo(0, -1);
+    ctx.lineTo(0, 36);
+    ctx.stroke();
+
+    ctx.fillStyle = '#FACC15';
+    ctx.beginPath();
+    ctx.arc(0, -8, 6.5, 0, Math.PI * 2);
+    ctx.fill();
+    ctx.strokeStyle = '#422006';
+    ctx.lineWidth = 2;
+    ctx.stroke();
+
+    // Castle Level Badge above keep
+    ctx.font = '800 13px "Fredoka", sans-serif';
+    ctx.textAlign = 'center';
+    ctx.lineWidth = 4;
+    ctx.strokeStyle = '#0F172A';
+    const lvlText = `Castelo Nv.${sim.baseLevel}`;
+    ctx.strokeText(lvlText, 0, -104);
+    ctx.fillStyle = '#FEF08A';
+    ctx.fillText(lvlText, 0, -104);
+
+    ctx.restore();
+  }
+
   private drawHordeWarningArrow(
     ctx: CanvasRenderingContext2D,
-    cx: number,
-    cy: number,
+    x: number,
+    y: number,
     angle: number,
     timer: number,
     time: number,
     isBoss: boolean
   ) {
-    const r = (isBoss ? 336 : 344) + Math.sin(time * 9) * 4;
-    const x = cx + Math.cos(angle) * r;
-    const y = cy + Math.sin(angle) * r;
+    const nudge = Math.sin(time * 9) * 5;
     const pulse = 0.65 + Math.sin(time * (isBoss ? 14 : 11)) * 0.35;
 
     ctx.save();
-    ctx.translate(x, y);
-    ctx.rotate(angle + Math.PI); // Point inward toward arena center
+    ctx.translate(x + Math.cos(angle) * nudge, y + Math.sin(angle) * nudge);
+    ctx.rotate(angle);
     ctx.globalAlpha = Math.min(1, pulse * Math.min(1, timer * 1.4));
-    if (isBoss) ctx.scale(1.45, 1.45);
+    if (isBoss) ctx.scale(1.4, 1.4);
 
     ctx.fillStyle = isBoss ? '#DC2626' : '#EF4444';
     ctx.strokeStyle = isBoss ? '#FACC15' : '#FEF08A';
@@ -652,7 +880,6 @@ export class ArenaRenderer {
     ctx.translate(blade.x, blade.y);
     ctx.globalAlpha = fade;
 
-    // Whirlwind slash ring
     ctx.strokeStyle = 'rgba(52, 211, 153, 0.55)';
     ctx.lineWidth = 6;
     ctx.beginPath();
@@ -661,7 +888,6 @@ export class ArenaRenderer {
 
     ctx.rotate(blade.rotation);
 
-    // Twin giant spinning emerald blades
     for (let i = 0; i < 2; i++) {
       ctx.save();
       ctx.rotate(i * Math.PI);
@@ -683,7 +909,6 @@ export class ArenaRenderer {
       ctx.restore();
     }
 
-    // Center golden hilt
     ctx.fillStyle = '#FACC15';
     ctx.strokeStyle = '#422006';
     ctx.lineWidth = 3;
@@ -699,125 +924,13 @@ export class ArenaRenderer {
     ctx.save();
     ctx.beginPath();
     ctx.arc(x, y, range, 0, Math.PI * 2);
-    ctx.fillStyle = 'rgba(255, 255, 255, 0.07)';
+    ctx.fillStyle = 'rgba(255, 255, 255, 0.08)';
     ctx.fill();
-    ctx.lineWidth = 1.5;
+    ctx.lineWidth = 1.8;
     ctx.setLineDash([6, 6]);
-    ctx.strokeStyle = 'rgba(255, 255, 255, 0.6)';
+    ctx.strokeStyle = 'rgba(255, 255, 255, 0.65)';
     ctx.stroke();
     ctx.setLineDash([]);
-    ctx.restore();
-  }
-
-  private drawCentralBase(ctx: CanvasRenderingContext2D, sim: GameSimulation) {
-    const { centerX: cx, centerY: cy } = sim.arena;
-    const pulse = Math.sin(sim.time * 4.2) * 2.5;
-    const hitFlash = sim.baseHitFlash > 0;
-    const overcharged = sim.spells.overchargeTimer > 0;
-
-    ctx.save();
-    ctx.translate(cx, cy);
-
-    if (overcharged) {
-      ctx.strokeStyle = '#FDE047';
-      ctx.lineWidth = 3;
-      ctx.beginPath();
-      ctx.arc(0, 0, 56 + Math.sin(sim.time * 12) * 4, 0, Math.PI * 2);
-      ctx.stroke();
-    }
-
-    const aura = ctx.createRadialGradient(0, 0, 12, 0, 0, 74 + pulse);
-    aura.addColorStop(
-      0,
-      hitFlash
-        ? 'rgba(239, 68, 68, 0.65)'
-        : overcharged
-          ? 'rgba(250, 204, 21, 0.72)'
-          : 'rgba(251, 146, 60, 0.55)'
-    );
-    aura.addColorStop(1, 'rgba(251, 146, 60, 0)');
-    ctx.fillStyle = aura;
-    ctx.beginPath();
-    ctx.arc(0, 0, 74 + pulse, 0, Math.PI * 2);
-    ctx.fill();
-
-    for (let i = 0; i < 8; i++) {
-      const a = (i / 8) * Math.PI * 2;
-      const sx = Math.cos(a) * 34;
-      const sy = Math.sin(a) * 28 + 8;
-      ctx.fillStyle = i % 2 === 0 ? '#94A3B8' : '#78716C';
-      ctx.strokeStyle = '#292524';
-      ctx.lineWidth = 2.5;
-      ctx.beginPath();
-      ctx.ellipse(sx, sy, 9, 6.5, a, 0, Math.PI * 2);
-      ctx.fill();
-      ctx.stroke();
-    }
-
-    ctx.strokeStyle = '#451A03';
-    ctx.fillStyle = '#92400E';
-    ctx.lineWidth = 2.5;
-    for (const ang of [-0.45, 0.45]) {
-      ctx.save();
-      ctx.translate(0, 14);
-      ctx.rotate(ang);
-      ctx.beginPath();
-      ctx.roundRect(-24, -4, 48, 8, 4);
-      ctx.fill();
-      ctx.stroke();
-      ctx.restore();
-    }
-
-    for (let i = -1; i <= 1; i++) {
-      const flick = Math.sin(sim.time * 9 + i * 2.1) * 4;
-      ctx.fillStyle = i === 0 ? '#F97316' : '#FACC15';
-      ctx.beginPath();
-      ctx.moveTo(i * 14 - 10, 12);
-      ctx.quadraticCurveTo(i * 14, -18 + flick, i * 14 + 10, 12);
-      ctx.closePath();
-      ctx.fill();
-    }
-
-    const bob = Math.sin(sim.time * 3.1) * 2.5;
-    ctx.save();
-    ctx.translate(0, -6 + bob);
-
-    ctx.fillStyle = 'rgba(0,0,0,0.22)';
-    ctx.beginPath();
-    ctx.ellipse(0, 22 - bob, 20, 7, 0, 0, Math.PI * 2);
-    ctx.fill();
-
-    const eggGrad = ctx.createLinearGradient(-16, -24, 16, 20);
-    eggGrad.addColorStop(0, hitFlash ? '#FCA5A5' : '#FDE047');
-    eggGrad.addColorStop(0.55, hitFlash ? '#EF4444' : '#F97316');
-    eggGrad.addColorStop(1, '#C2410C');
-    ctx.fillStyle = eggGrad;
-    ctx.strokeStyle = '#271306';
-    ctx.lineWidth = 3;
-    ctx.beginPath();
-    ctx.moveTo(0, -28);
-    ctx.bezierCurveTo(20, -24, 24, 4, 18, 18);
-    ctx.bezierCurveTo(10, 26, -10, 26, -18, 18);
-    ctx.bezierCurveTo(-24, 4, -20, -24, 0, -28);
-    ctx.closePath();
-    ctx.fill();
-    ctx.stroke();
-
-    ctx.fillStyle = 'rgba(255, 251, 214, 0.72)';
-    ctx.beginPath();
-    ctx.ellipse(-6, -8, 4.5, 9, -0.25, 0, Math.PI * 2);
-    ctx.fill();
-    ctx.restore();
-
-    ctx.font = '800 13px "Fredoka", sans-serif';
-    ctx.textAlign = 'center';
-    ctx.lineWidth = 3.5;
-    ctx.strokeStyle = '#182014';
-    const lvlText = `Nv.${sim.baseLevel}`;
-    ctx.strokeText(lvlText, 0, -39 + bob);
-    ctx.fillStyle = '#FEF08A';
-    ctx.fillText(lvlText, 0, -39 + bob);
-
     ctx.restore();
   }
 
@@ -835,21 +948,6 @@ export class ArenaRenderer {
       time,
       unit.id
     );
-
-    if (unit.hp < unit.maxHp && unit.hp > 0) {
-      const ratio = Math.max(0, unit.hp / unit.maxHp);
-      ctx.save();
-      ctx.fillStyle = '#182014';
-      ctx.beginPath();
-      ctx.roundRect(unit.x - 16, unit.y + 21, 32, 6, 3);
-      ctx.fill();
-
-      ctx.fillStyle = ratio > 0.4 ? '#4ADE80' : '#F43F5E';
-      ctx.beginPath();
-      ctx.roundRect(unit.x - 15, unit.y + 22, 30 * ratio, 4, 2);
-      ctx.fill();
-      ctx.restore();
-    }
   }
 
   private drawUnitSprite(
@@ -865,7 +963,7 @@ export class ArenaRenderer {
     time: number,
     seed: number
   ) {
-    const idleBob = Math.sin(time * 3.8 + seed) * 1.6;
+    const idleBob = Math.sin(time * 3.8 + seed) * 1.5;
     const levelScale = 1 + (level - 1) * 0.09;
     const scaleX = (1 + recoil * 0.16) * levelScale;
     const scaleY = (1 - recoil * 0.14) * levelScale;
@@ -1081,7 +1179,7 @@ export class ArenaRenderer {
     ctx.fill();
 
     if (isBoss && !enemy.isDead) {
-      ctx.strokeStyle = 'rgba(250, 204, 21, 0.6)';
+      ctx.strokeStyle = 'rgba(250, 204, 21, 0.65)';
       ctx.lineWidth = 3;
       ctx.beginPath();
       ctx.ellipse(0, enemy.radius - 4, enemy.radius * 1.08, 13, 0, 0, Math.PI * 2);
@@ -1156,7 +1254,6 @@ export class ArenaRenderer {
         ctx.fillRect(-10, 0 + shieldRaise, 8, 5);
       }
     } else if (enemy.kind === 'boss') {
-      // Giant Stage Boss Zombie King
       ctx.fillStyle = flash ? '#FFFFFF' : '#581C87';
       ctx.strokeStyle = '#0F172A';
       ctx.lineWidth = 3.2;
@@ -1165,7 +1262,6 @@ export class ArenaRenderer {
       ctx.fill();
       ctx.stroke();
 
-      // Crimson chest plate & pauldrons
       if (!flash) {
         ctx.fillStyle = '#991B1B';
         ctx.beginPath();
@@ -1175,7 +1271,6 @@ export class ArenaRenderer {
         ctx.stroke();
       }
 
-      // Boss head
       ctx.fillStyle = flash ? '#FFFFFF' : '#A855F7';
       ctx.beginPath();
       ctx.arc(0, -24, 19, 0, Math.PI * 2);
@@ -1183,7 +1278,6 @@ export class ArenaRenderer {
       ctx.stroke();
       this.drawZombieFace(ctx, 0, -24);
 
-      // Jagged golden crown
       ctx.fillStyle = flash ? '#FFFFFF' : '#FACC15';
       ctx.strokeStyle = '#422006';
       ctx.lineWidth = 2.5;
@@ -1199,7 +1293,6 @@ export class ArenaRenderer {
       ctx.fill();
       ctx.stroke();
 
-      // Giant broad cleaver
       ctx.save();
       ctx.translate(-26, -6);
       ctx.rotate(-0.45 - enemy.attackAnim * 0.65);
@@ -1276,7 +1369,7 @@ export class ArenaRenderer {
         ctx.fillStyle = '#FACC15';
         ctx.fillText(`CHEFE · ${enemy.hp}`, enemy.x, yPos - 5);
       } else {
-        ctx.font = '800 15px "Fredoka", "Plus Jakarta Sans", sans-serif';
+        ctx.font = '800 14px "Fredoka", "Plus Jakarta Sans", sans-serif';
         ctx.textAlign = 'center';
         ctx.textBaseline = 'bottom';
         ctx.lineWidth = 3.5;

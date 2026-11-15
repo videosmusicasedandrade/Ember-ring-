@@ -9,7 +9,12 @@ export type SpellKind = 'blade' | 'shockwave' | 'overcharge';
 export type ParticleKind = 'circle' | 'smoke' | 'grass' | 'spark';
 
 export const MAX_UNIT_LEVEL = 4;
-export const TOTAL_STAGES = 10;
+export const TOTAL_STAGES = 30;
+
+export interface RouteWaypoint {
+  x: number;
+  y: number;
+}
 
 export interface StageConfig {
   stage: number;
@@ -27,10 +32,11 @@ export interface ArenaConfig {
   worldHeight: number;
   centerX: number;
   centerY: number;
-  outerTrackRadius: number;
-  innerGrassRadius: number;
-  coreRadius: number;
-  spawnRadius: number;
+  castleX: number;
+  castleY: number;
+  castleRadius: number;
+  roadHalfWidth: number;
+  waypoints: ReadonlyArray<RouteWaypoint>;
 }
 
 export interface ArenaSlot {
@@ -46,6 +52,7 @@ export interface ArenaSlot {
 export interface UnitSpec {
   kind: UnitKind;
   name: string;
+  shortRole: string;
   role: string;
   cost: number;
   maxHp: number;
@@ -97,6 +104,9 @@ export interface EnemyEntity {
   rewardScore: number;
   walkPhase: number;
   distanceTraveled: number;
+  waypointIndex: number;
+  laneOffset: number;
+  pathProgress: number;
   hitFlash: number;
   knockbackVx: number;
   knockbackVy: number;
@@ -155,6 +165,8 @@ export interface ShockwaveRingEffect {
 }
 
 export interface HordeWarningIndicator {
+  x: number;
+  y: number;
   angle: number;
   timer: number;
   maxTimer: number;
@@ -240,15 +252,45 @@ export interface HudSnapshot {
   bossActive: boolean;
 }
 
+/**
+ * Smooth S-curve path from the West Invasion Portal (x=100, y=260)
+ * through three tactical switchbacks to the East Castle Gate (x=1065, y=455).
+ */
+export const DEFAULT_ROUTE_WAYPOINTS: ReadonlyArray<RouteWaypoint> = [
+  { x: 96, y: 265 },
+  { x: 245, y: 265 },
+  { x: 285, y: 285 },
+  { x: 295, y: 330 },
+  { x: 295, y: 500 },
+  { x: 315, y: 545 },
+  { x: 365, y: 560 },
+  { x: 515, y: 560 },
+  { x: 560, y: 540 },
+  { x: 575, y: 495 },
+  { x: 575, y: 295 },
+  { x: 595, y: 250 },
+  { x: 645, y: 235 },
+  { x: 785, y: 235 },
+  { x: 830, y: 255 },
+  { x: 845, y: 300 },
+  { x: 845, y: 490 },
+  { x: 865, y: 535 },
+  { x: 915, y: 550 },
+  { x: 1015, y: 540 },
+  { x: 1065, y: 495 },
+  { x: 1065, y: 445 },
+];
+
 export const DEFAULT_ARENA: ArenaConfig = {
   worldWidth: 1200,
   worldHeight: 820,
-  centerX: 600,
-  centerY: 420,
-  outerTrackRadius: 315,
-  innerGrassRadius: 235,
-  coreRadius: 46,
-  spawnRadius: 430,
+  centerX: 580,
+  centerY: 410,
+  castleX: 1065,
+  castleY: 415,
+  castleRadius: 42,
+  roadHalfWidth: 30,
+  waypoints: DEFAULT_ROUTE_WAYPOINTS,
 };
 
 export const SPELL_SPECS: Record<
@@ -265,7 +307,7 @@ export const SPELL_SPECS: Record<
     name: 'Onda de Choque',
     hotkey: 'W',
     cooldown: 15,
-    description: 'Empurra toda a horda',
+    description: 'Recua toda a horda',
   },
   overcharge: {
     name: 'SuperCarga',
@@ -279,6 +321,7 @@ export const UNIT_SPECS: Record<UnitKind, UnitSpec> = {
   scout: {
     kind: 'scout',
     name: 'Batedor',
+    shortRole: 'Tiro rápido',
     role: 'Tiro rápido à distância',
     cost: 30,
     maxHp: 75,
@@ -293,12 +336,13 @@ export const UNIT_SPECS: Record<UnitKind, UnitSpec> = {
   shield: {
     kind: 'shield',
     name: 'Escudeiro',
-    role: 'Tanque azul & impacto',
+    shortRole: 'Onda azul',
+    role: 'Onda de escudo & impacto',
     cost: 45,
     maxHp: 175,
-    range: 175,
+    range: 185,
     damage: 24,
-    cooldown: 1.05,
+    cooldown: 1.0,
     critChance: 0.15,
     color: '#2563EB',
     accentColor: '#FACC15',
@@ -307,12 +351,13 @@ export const UNIT_SPECS: Record<UnitKind, UnitSpec> = {
   frog: {
     kind: 'frog',
     name: 'Sapo Lâmina',
+    shortRole: 'Corte área',
     role: 'Corte esmeralda em área',
     cost: 70,
     maxHp: 130,
-    range: 160,
+    range: 170,
     damage: 42,
-    cooldown: 0.85,
+    cooldown: 0.84,
     critChance: 0.26,
     color: '#22C55E',
     accentColor: '#2DD4BF',

@@ -1,5 +1,5 @@
 import React, { useEffect, useState } from 'react';
-import { Music, Pause, Plus, RotateCcw, Volume2, VolumeX } from 'lucide-react';
+import { Music, Pause, Plus, RotateCcw, Shield, Volume2, VolumeX } from 'lucide-react';
 import { soundEngine } from '../game/audio';
 import { HudSnapshot, SPELL_SPECS, SpellKind, UNIT_SPECS, UnitKind } from '../game/types';
 
@@ -21,7 +21,7 @@ const SPELL_ORDER: SpellKind[] = ['blade', 'shockwave', 'overcharge'];
 function UnitIcon({ kind }: { kind: UnitKind }) {
   if (kind === 'scout') {
     return (
-      <svg viewBox="0 0 24 24" className="h-6 w-6 shrink-0" aria-hidden="true">
+      <svg viewBox="0 0 24 24" className="h-7 w-7 shrink-0" aria-hidden="true">
         <circle cx="12" cy="13" r="7" fill="#FED7AA" stroke="#1E293B" strokeWidth="2" />
         <path d="M5 11a7 7 0 0 1 14 0z" fill="#2563EB" stroke="#1E293B" strokeWidth="2" />
         <rect x="10" y="9" width="10" height="3.5" rx="1.5" fill="#FFFFFF" stroke="#1E293B" strokeWidth="1.5" />
@@ -30,14 +30,14 @@ function UnitIcon({ kind }: { kind: UnitKind }) {
   }
   if (kind === 'shield') {
     return (
-      <svg viewBox="0 0 24 24" className="h-6 w-6 shrink-0" aria-hidden="true">
+      <svg viewBox="0 0 24 24" className="h-7 w-7 shrink-0" aria-hidden="true">
         <rect x="5" y="4" width="14" height="16" rx="5" fill="#3B82F6" stroke="#0F172A" strokeWidth="2" />
         <circle cx="12" cy="12" r="3.5" fill="#FACC15" />
       </svg>
     );
   }
   return (
-    <svg viewBox="0 0 24 24" className="h-6 w-6 shrink-0" aria-hidden="true">
+    <svg viewBox="0 0 24 24" className="h-7 w-7 shrink-0" aria-hidden="true">
       <ellipse cx="12" cy="14" rx="7.5" ry="6" fill="#4ADE80" stroke="#14532D" strokeWidth="2" />
       <circle cx="7.5" cy="7.5" r="3" fill="#FB7185" stroke="#881337" strokeWidth="1.5" />
       <circle cx="16.5" cy="7.5" r="3" fill="#FB7185" stroke="#881337" strokeWidth="1.5" />
@@ -97,43 +97,61 @@ export const GameHUD: React.FC<GameHUDProps> = ({
 
   const hpPercent = Math.max(0, Math.min(100, (hud.baseHp / hud.baseMaxHp) * 100));
   const ghostPercent = Math.max(hpPercent, Math.min(100, (ghostHp / hud.baseMaxHp) * 100));
+  const hpFillClass =
+    hpPercent > 60
+      ? 'from-[#22C55E] to-[#4ADE80]'
+      : hpPercent > 30
+        ? 'from-[#F59E0B] to-[#FACC15]'
+        : 'from-[#DC2626] to-[#FB7185]';
 
   return (
-    <div className="pointer-events-none fixed inset-0 z-20 flex flex-col justify-between p-2 sm:p-4">
-      {/* Top Row: Center Resource Plaque + Right Utility Controls */}
-      <div className="flex flex-col items-center gap-2 sm:flex-row sm:items-start sm:justify-between sm:gap-3">
-        <div className="hidden w-40 sm:block" />
-
+    <div className="pointer-events-none fixed inset-0 z-20 flex flex-col justify-between p-2.5 sm:p-4">
+      {/* Top Unified HUD: Castle HP Bar + Stage/Economy + Controls */}
+      <div className="flex flex-col gap-2 sm:flex-row sm:items-center sm:justify-between">
+        {/* Top-Left / Full-width Top on Mobile: Visible Castle HP Bar */}
         <div
-          aria-label="Recursos e progresso"
-          className="pointer-events-auto flex items-center gap-2.5 rounded-2xl border-2 border-[#233818] bg-[#2D471F]/92 px-3 py-1.5 shadow-[0_4px_0_rgba(20,34,12,0.55)] sm:mx-auto sm:gap-5 sm:px-4 sm:py-2"
+          aria-label="Vida do Castelo"
+          className="pointer-events-auto flex items-center gap-2.5 rounded-2xl border-2 border-[#1B2C13] bg-[#1E3115]/95 px-3 py-2 shadow-[0_4px_0_rgba(15,28,10,0.65)] sm:min-w-[270px] sm:gap-3"
         >
-          <div className="flex items-center gap-1.5 sm:gap-2">
-            <svg viewBox="0 0 24 24" className="h-5 w-5 shrink-0 sm:h-6 sm:w-6" aria-hidden="true">
-              <path
-                d="M12 2C16.5 3.5 18.5 10.5 17 16.5C15.5 21 8.5 21 7 16.5C5.5 10.5 7.5 3.5 12 2Z"
-                fill="#F97316"
-                stroke="#271306"
-                strokeWidth="2"
+          <div className="flex h-9 w-9 shrink-0 items-center justify-center rounded-xl border border-[#365424] bg-[#2D481E] text-[#FDE047]">
+            <Shield className="h-5 w-5" />
+          </div>
+          <div className="min-w-0 flex-1">
+            <div className="mb-1 flex items-center justify-between gap-2 text-xs font-bold leading-none">
+              <span className="flex items-center gap-1.5 whitespace-nowrap text-white">
+                <span className="uppercase tracking-wide text-[#FDE047]">Castelo</span>
+                <span className="font-mono-tabular text-[11px] text-[#BEF264]" data-testid="hud-level">
+                  Nv.{hud.baseLevel}
+                </span>
+              </span>
+              <span className="font-mono-tabular whitespace-nowrap text-white" data-testid="hud-hp">
+                {Math.round(hud.baseHp)}/{hud.baseMaxHp}
+              </span>
+            </div>
+            <div className="relative h-3.5 w-full overflow-hidden rounded-full border border-[#121F0C] bg-[#0F180B]">
+              <div
+                className="absolute inset-0 origin-left bg-[#FCA5A5]/70 transition-transform duration-300"
+                style={{ transform: `scaleX(${ghostPercent / 100})` }}
               />
-              <ellipse cx="10" cy="10" rx="2" ry="4" fill="#FDE047" opacity="0.85" />
-            </svg>
-            <div className="leading-none">
-              <div className="text-[9px] font-bold tracking-wider text-[#BEF264] uppercase sm:text-[10px]">Núcleo</div>
-              <div className="font-mono-tabular text-base font-bold text-white sm:text-lg" data-testid="hud-level">
-                Nv.{hud.baseLevel}
-              </div>
+              <div
+                className={`relative h-full w-full origin-left rounded-full bg-gradient-to-r transition-transform duration-150 ${hpFillClass}`}
+                style={{ transform: `scaleX(${hpPercent / 100})` }}
+              />
             </div>
           </div>
+        </div>
 
-          <div className="h-6 w-px bg-white/15 sm:h-7" />
-
+        {/* Center Plaque: Essence · Stage/Wave · Score */}
+        <div
+          aria-label="Recursos e progresso"
+          className="pointer-events-auto flex items-center justify-between gap-3 rounded-2xl border-2 border-[#1B2C13] bg-[#1E3115]/95 px-3.5 py-1.5 shadow-[0_4px_0_rgba(15,28,10,0.65)] sm:justify-center sm:gap-5 sm:px-5 sm:py-2"
+        >
           <div className="flex items-center gap-1.5 sm:gap-2">
-            <svg viewBox="0 0 24 24" className="h-4.5 w-4.5 shrink-0 sm:h-5 sm:w-5" aria-hidden="true">
+            <svg viewBox="0 0 24 24" className="h-5 w-5 shrink-0" aria-hidden="true">
               <polygon points="12,2 20,9 16,21 8,21 4,9" fill="#FACC15" stroke="#422006" strokeWidth="2" />
             </svg>
             <div className="leading-none">
-              <div className="text-[9px] font-bold tracking-wider text-[#FDE047] uppercase sm:text-[10px]">
+              <div className="text-[10px] font-bold tracking-wider text-[#FDE047] uppercase">
                 {hud.overchargeTimer > 0 ? 'Essência 1.5x' : 'Essência'}
               </div>
               <div
@@ -147,31 +165,32 @@ export const GameHUD: React.FC<GameHUDProps> = ({
             </div>
           </div>
 
-          <div className="h-6 w-px bg-white/15 sm:h-7" />
+          <div className="h-6 w-px bg-white/15" />
 
           <div className="leading-none text-center">
-            <div className="flex items-center justify-center gap-1 text-[9px] font-bold tracking-wider text-[#D9F99D] uppercase sm:text-[10px]">
+            <div className="flex items-center justify-center gap-1 text-[10px] font-bold tracking-wider text-[#D9F99D] uppercase">
               <span>Fase {hud.stage}</span>
               {hud.bossActive && (
-                <span className="rounded bg-[#DC2626] px-1 py-0.5 text-[8px] text-[#FEF08A] sm:text-[9px]">CHEFE</span>
+                <span className="rounded bg-[#DC2626] px-1 py-0.5 text-[9px] text-[#FEF08A]">CHEFE</span>
               )}
             </div>
             <div className="font-mono-tabular text-base font-bold text-white sm:text-lg" data-testid="hud-wave">
-              {hud.wave}/{hud.totalWavesInStage}
+              Onda {hud.wave}/{hud.totalWavesInStage}
             </div>
           </div>
 
-          <div className="h-6 w-px bg-white/15 sm:h-7" />
+          <div className="h-6 w-px bg-white/15" />
 
           <div className="leading-none text-right">
-            <div className="text-[9px] font-bold tracking-wider text-[#93C5FD] uppercase sm:text-[10px]">Pontos</div>
+            <div className="text-[10px] font-bold tracking-wider text-[#93C5FD] uppercase">Pontos</div>
             <div className="font-mono-tabular text-base font-bold text-white sm:text-lg" data-testid="hud-score">
               {Math.round(hud.score)}
             </div>
           </div>
         </div>
 
-        <div className="pointer-events-auto flex items-center gap-1.5 sm:gap-2">
+        {/* Top-Right Audio & Utility Controls */}
+        <div className="pointer-events-auto flex items-center justify-end gap-1.5 sm:gap-2">
           <button
             type="button"
             tabIndex={-1}
@@ -183,15 +202,15 @@ export const GameHUD: React.FC<GameHUDProps> = ({
               soundEngine.playClick();
               onToggleMuteMusic();
             }}
-            className={`relative flex h-9 w-9 items-center justify-center rounded-xl border-2 border-[#233818] shadow-[0_3px_0_rgba(20,34,12,0.55)] transition-transform active:translate-y-0.5 sm:h-10 sm:w-10 ${
+            className={`relative flex h-10 w-10 items-center justify-center rounded-xl border-2 border-[#1B2C13] shadow-[0_3px_0_rgba(15,28,10,0.6)] transition-transform active:translate-y-0.5 ${
               hud.mutedMusic
-                ? 'bg-[#223617]/92 text-red-300 hover:bg-[#2F4A20]'
-                : 'bg-[#2D471F]/92 text-[#BEF264] hover:bg-[#3A5B28]'
+                ? 'bg-[#1A2B12]/95 text-red-300 hover:bg-[#273E1C]'
+                : 'bg-[#1E3115]/95 text-[#BEF264] hover:bg-[#2E4821]'
             }`}
           >
-            <Music className="h-4 w-4 sm:h-4.5 sm:w-4.5" />
+            <Music className="h-4.5 w-4.5" />
             {hud.mutedMusic && (
-              <span className="pointer-events-none absolute h-0.5 w-5 rotate-45 rounded bg-red-400 sm:w-6" />
+              <span className="pointer-events-none absolute h-0.5 w-5 rotate-45 rounded bg-red-400" />
             )}
           </button>
           <button
@@ -204,13 +223,13 @@ export const GameHUD: React.FC<GameHUDProps> = ({
               e.currentTarget.blur();
               onToggleMuteSfx();
             }}
-            className={`flex h-9 w-9 items-center justify-center rounded-xl border-2 border-[#233818] shadow-[0_3px_0_rgba(20,34,12,0.55)] transition-transform active:translate-y-0.5 sm:h-10 sm:w-10 ${
+            className={`flex h-10 w-10 items-center justify-center rounded-xl border-2 border-[#1B2C13] shadow-[0_3px_0_rgba(15,28,10,0.6)] transition-transform active:translate-y-0.5 ${
               hud.mutedSfx
-                ? 'bg-[#223617]/92 text-red-300 hover:bg-[#2F4A20]'
-                : 'bg-[#2D471F]/92 text-white hover:bg-[#3A5B28]'
+                ? 'bg-[#1A2B12]/95 text-red-300 hover:bg-[#273E1C]'
+                : 'bg-[#1E3115]/95 text-white hover:bg-[#2E4821]'
             }`}
           >
-            {hud.mutedSfx ? <VolumeX className="h-4.5 w-4.5 sm:h-5 sm:w-5" /> : <Volume2 className="h-4.5 w-4.5 sm:h-5 sm:w-5" />}
+            {hud.mutedSfx ? <VolumeX className="h-4.5 w-4.5" /> : <Volume2 className="h-4.5 w-4.5" />}
           </button>
           <button
             type="button"
@@ -221,9 +240,9 @@ export const GameHUD: React.FC<GameHUDProps> = ({
               soundEngine.playClick();
               onTogglePause();
             }}
-            className="flex h-9 w-9 items-center justify-center rounded-xl border-2 border-[#233818] bg-[#2D471F]/92 text-white shadow-[0_3px_0_rgba(20,34,12,0.55)] transition-transform active:translate-y-0.5 hover:bg-[#3A5B28] sm:h-10 sm:w-10"
+            className="flex h-10 w-10 items-center justify-center rounded-xl border-2 border-[#1B2C13] bg-[#1E3115]/95 text-white shadow-[0_3px_0_rgba(15,28,10,0.6)] transition-transform active:translate-y-0.5 hover:bg-[#2E4821]"
           >
-            <Pause className="h-4.5 w-4.5 sm:h-5 sm:w-5" />
+            <Pause className="h-4.5 w-4.5" />
           </button>
           <button
             type="button"
@@ -234,45 +253,16 @@ export const GameHUD: React.FC<GameHUDProps> = ({
               soundEngine.playClick();
               onRestart();
             }}
-            className="flex h-9 w-9 items-center justify-center rounded-xl border-2 border-[#233818] bg-[#2D471F]/92 text-white shadow-[0_3px_0_rgba(20,34,12,0.55)] transition-transform active:translate-y-0.5 hover:bg-[#3A5B28] sm:h-10 sm:w-10"
+            className="flex h-10 w-10 items-center justify-center rounded-xl border-2 border-[#1B2C13] bg-[#1E3115]/95 text-white shadow-[0_3px_0_rgba(15,28,10,0.6)] transition-transform active:translate-y-0.5 hover:bg-[#2E4821]"
           >
-            <RotateCcw className="h-4.5 w-4.5 sm:h-5 sm:w-5" />
+            <RotateCcw className="h-4.5 w-4.5" />
           </button>
         </div>
       </div>
 
-      {/* Base Health Bar (Top-Left below header on mobile portrait, Center-Left on desktop) */}
+      {/* Active Spells Panel */}
       <div
-        className="pointer-events-none fixed left-3 top-[104px] z-20 sm:left-5 sm:top-1/2 sm:-translate-y-1/2"
-        aria-label="Vida da base"
-      >
-        <div className="w-32 rounded-xl border-2 border-[#233818] bg-[#243918]/92 p-2 shadow-[0_4px_0_rgba(20,34,12,0.55)] sm:w-44 sm:p-2.5">
-          <div className="mb-1 flex items-center justify-between text-[11px] font-bold sm:mb-1.5 sm:text-xs">
-            <span className="tracking-wide text-[#FECACA] uppercase">Base</span>
-            <span className="font-mono-tabular text-white" data-testid="hud-hp">
-              {Math.round(hud.baseHp)}/{hud.baseMaxHp}
-            </span>
-          </div>
-          <div className="relative h-3.5 w-full overflow-hidden rounded-lg border border-[#182611] bg-[#162110] sm:h-4">
-            <div
-              className="absolute inset-0 origin-left bg-[#FCA5A5] transition-transform duration-300"
-              style={{ transform: `scaleX(${ghostPercent / 100})` }}
-            />
-            <div
-              className="relative h-full w-full origin-left transition-transform duration-150"
-              style={{
-                transform: `scaleX(${hpPercent / 100})`,
-                backgroundImage:
-                  'repeating-linear-gradient(-45deg, #F43F5E, #F43F5E 6px, #FB7185 6px, #FB7185 12px)',
-              }}
-            />
-          </div>
-        </div>
-      </div>
-
-      {/* Active Spells Panel (Bottom-Right above recruitment dock on mobile, Center-Right on desktop) */}
-      <div
-        className="pointer-events-auto fixed bottom-[84px] right-2.5 z-20 flex flex-row gap-1.5 sm:bottom-auto sm:right-5 sm:top-1/2 sm:-translate-y-1/2 sm:flex-col sm:gap-2"
+        className="pointer-events-auto fixed bottom-[152px] right-2.5 z-20 flex flex-row gap-1.5 sm:bottom-auto sm:right-4 sm:top-[74px] sm:translate-y-0 sm:flex-col sm:gap-2"
         aria-label="Habilidades especiais"
       >
         {SPELL_ORDER.map((kind) => {
@@ -294,14 +284,14 @@ export const GameHUD: React.FC<GameHUDProps> = ({
                 e.currentTarget.blur();
                 onActivateSpell(kind);
               }}
-              className={`relative flex items-center gap-2 overflow-hidden rounded-2xl border-2 px-2.5 py-1.5 text-left shadow-[0_4px_0_rgba(20,34,12,0.55)] transition-transform active:translate-y-0.5 sm:gap-2.5 sm:px-3 sm:py-2 ${
+              className={`relative flex items-center gap-2 overflow-hidden rounded-2xl border-2 px-2.5 py-1.5 text-left shadow-[0_4px_0_rgba(15,28,10,0.6)] transition-transform active:translate-y-0.5 sm:gap-2.5 sm:px-3 sm:py-2 ${
                 isTargeting
-                  ? 'border-[#6EE7B7] bg-[#1E4D36]'
+                  ? 'border-[#6EE7B7] bg-[#16452E]'
                   : isOverchargeActive
                     ? 'border-[#FACC15] bg-[#4C4217]'
                     : isReady
-                      ? 'border-[#233818] bg-[#2D471F]/94 hover:bg-[#3B5D29]'
-                      : 'border-[#1C2C14] bg-[#1F3115]/88 opacity-80'
+                      ? 'border-[#1B2C13] bg-[#1E3115]/95 hover:bg-[#2B461F]'
+                      : 'border-[#15220F] bg-[#172511]/90 opacity-85'
               }`}
             >
               {!isReady && (
@@ -310,7 +300,7 @@ export const GameHUD: React.FC<GameHUDProps> = ({
                   style={{ transform: `scaleY(${cdProgress})` }}
                 />
               )}
-              <div className="relative z-10 flex h-8 w-8 items-center justify-center rounded-lg bg-[#1A2B11]/90">
+              <div className="relative z-10 flex h-8 w-8 shrink-0 items-center justify-center rounded-lg bg-[#13200D]">
                 <SpellIcon kind={kind} />
               </div>
               <div className="relative z-10 hidden leading-tight sm:block">
@@ -320,7 +310,7 @@ export const GameHUD: React.FC<GameHUDProps> = ({
                 </div>
                 <div className="font-mono-tabular whitespace-nowrap text-[11px] text-[#D9F99D]">
                   {isTargeting
-                    ? 'Clique na arena'
+                    ? 'Clique no mapa'
                     : isOverchargeActive
                       ? `Ativa ${hud.overchargeTimer.toFixed(1)}s`
                       : isReady
@@ -338,9 +328,9 @@ export const GameHUD: React.FC<GameHUDProps> = ({
         })}
       </div>
 
-      {/* Bottom Troop Recruitment Dock */}
-      <div className="pointer-events-none flex flex-col items-center gap-1.5">
-        <div className="pointer-events-auto flex max-w-full items-center gap-1 rounded-2xl border-2 border-[#233818] bg-[#2D471F]/94 p-1 shadow-[0_4px_0_rgba(20,34,12,0.6)] sm:gap-2 sm:p-1.5">
+      {/* Bottom Troop Recruitment Dock — Clean, Legible Names & Clear Layout */}
+      <div className="pointer-events-none flex w-full justify-center">
+        <div className="pointer-events-auto grid w-full max-w-md grid-cols-3 gap-1.5 rounded-2xl border-2 border-[#1B2C13] bg-[#1E3115]/96 p-1.5 shadow-[0_5px_0_rgba(15,28,10,0.7)] sm:flex sm:w-auto sm:max-w-none sm:items-center sm:gap-2.5 sm:p-2">
           {UNIT_ORDER.map((kind) => {
             const spec = UNIT_SPECS[kind];
             const isSelected = hud.selectedUnit === kind;
@@ -348,11 +338,11 @@ export const GameHUD: React.FC<GameHUDProps> = ({
             return (
               <div
                 key={kind}
-                className={`flex items-center gap-0.5 rounded-xl border-2 p-0.5 transition-colors sm:gap-1 sm:p-1 ${
+                className={`flex flex-col justify-between gap-1 rounded-xl border-2 p-1.5 transition-colors sm:flex-row sm:items-center sm:gap-2 sm:px-2.5 sm:py-1.5 ${
                   isSelected
-                    ? 'border-[#FDE047] bg-[#456B2E]'
-                    : 'border-transparent bg-[#233818]/80 hover:bg-[#365424]'
-                } ${!canAfford ? 'opacity-65' : ''}`}
+                    ? 'border-[#FDE047] bg-[#365624]'
+                    : 'border-[#2B431E] bg-[#162510]/90 hover:bg-[#263F1B]'
+                } ${!canAfford ? 'opacity-70' : ''}`}
               >
                 <button
                   type="button"
@@ -365,20 +355,27 @@ export const GameHUD: React.FC<GameHUDProps> = ({
                     e.currentTarget.blur();
                     onSelectUnit(kind);
                   }}
-                  className="flex cursor-grab touch-none items-center gap-1.5 px-1.5 py-0.5 text-left active:cursor-grabbing sm:gap-2 sm:px-2"
+                  className="flex min-w-0 flex-1 cursor-grab touch-none flex-col items-start gap-1 text-left active:cursor-grabbing sm:flex-row sm:items-center sm:gap-2.5"
                 >
-                  <UnitIcon kind={kind} />
-                  <div className="leading-tight">
-                    <div className="flex items-center gap-1 whitespace-nowrap text-[11px] font-bold text-white sm:gap-1.5 sm:text-xs">
+                  <div className="flex w-full items-center justify-between gap-1 sm:w-auto">
+                    <UnitIcon kind={kind} />
+                    <span className="font-mono-tabular rounded bg-[#111D0C] px-1.5 py-0.5 text-[11px] font-bold text-[#FACC15] sm:hidden">
+                      {spec.cost}
+                    </span>
+                  </div>
+                  <div className="min-w-0 leading-tight">
+                    <div className="flex items-center gap-1.5 whitespace-nowrap text-xs font-bold text-white sm:text-sm">
                       <span>{spec.name}</span>
                       <span className="font-mono-tabular hidden text-[11px] text-[#FDE047] sm:inline">
                         [{spec.hotkey}]
                       </span>
                     </div>
                     <div className="flex items-center gap-1.5 whitespace-nowrap text-[11px] text-[#D9F99D]">
-                      <span className="font-mono-tabular font-bold text-[#FACC15]">{spec.cost}</span>
+                      <span className="font-mono-tabular hidden font-bold text-[#FACC15] sm:inline">
+                        {spec.cost} ess.
+                      </span>
                       <span aria-hidden="true" className="hidden sm:inline">·</span>
-                      <span className="hidden sm:inline">{spec.role}</span>
+                      <span className="text-[10px] sm:text-[11px]">{spec.shortRole}</span>
                     </div>
                   </div>
                 </button>
@@ -391,9 +388,10 @@ export const GameHUD: React.FC<GameHUDProps> = ({
                     e.currentTarget.blur();
                     onQuickRecruit(kind);
                   }}
-                  className="flex h-7 w-7 shrink-0 items-center justify-center rounded-lg border border-[#1D3212] bg-[#5CA832] text-white shadow-[0_2px_0_#1D3212] transition-transform active:translate-y-0.5 hover:bg-[#6DC23E] disabled:cursor-not-allowed disabled:opacity-40 sm:h-8 sm:w-8"
+                  className="flex h-8 w-full shrink-0 items-center justify-center gap-1 rounded-lg border border-[#16290E] bg-[#22C55E] text-xs font-bold text-white shadow-[0_2px_0_#15803D] transition-transform active:translate-y-0.5 hover:bg-[#4ADE80] disabled:cursor-not-allowed disabled:opacity-40 sm:h-9 sm:w-9"
                 >
-                  <Plus className="h-3.5 w-3.5 stroke-[3] sm:h-4 sm:w-4" />
+                  <Plus className="h-4 w-4 stroke-[3]" />
+                  <span className="sm:hidden">Criar</span>
                 </button>
               </div>
             );

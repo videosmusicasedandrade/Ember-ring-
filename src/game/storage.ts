@@ -1,9 +1,13 @@
 import {
+  FX_STYLES,
+  FxStyleId,
   HERO_XP_THRESHOLDS,
   HeroClass,
   HeroSaveData,
   HeroUpgradeId,
   MAX_HERO_LEVEL,
+  RING_SKINS,
+  RingSkinId,
   TOTAL_STAGES,
 } from './types';
 
@@ -19,10 +23,20 @@ export interface SavedProgress {
   talents: Record<string, number>;
   heroes: Record<HeroClass, HeroSaveData>;
   convergenceStages: number[];
+  enemyKillsByCatalogId: Record<number, number>;
+  discoveredEnemyIds: number[];
+  unlockedAchievements: string[];
+  achievementProgress: Record<string, number>;
+  unlockedCosmetics: string[];
+  equippedRingSkin: RingSkinId;
+  equippedFxStyle: FxStyleId;
+  totalLifetimeKills: number;
 }
 
 const VALID_HEROES: HeroClass[] = ['archer', 'swordsman', 'bomber'];
 const VALID_UPGRADES: HeroUpgradeId[] = ['power', 'haste', 'fortress', 'area'];
+const VALID_RING_SKINS = Object.keys(RING_SKINS) as RingSkinId[];
+const VALID_FX_STYLES = Object.keys(FX_STYLES) as FxStyleId[];
 
 export function createDefaultHeroSave(): HeroSaveData {
   return {
@@ -101,13 +115,38 @@ function sanitizeConvergenceStages(raw: unknown): number[] {
   return valid;
 }
 
+function sanitizeNumberRecord(raw: unknown): Record<number, number> {
+  const out: Record<number, number> = {};
+  if (!raw || typeof raw !== 'object') return out;
+  for (const [k, v] of Object.entries(raw as Record<string, unknown>)) {
+    const numKey = Math.floor(Number(k));
+    const numVal = Math.max(0, Math.floor(Number(v) || 0));
+    if (Number.isFinite(numKey) && numKey > 0 && numVal > 0) {
+      out[numKey] = numVal;
+    }
+  }
+  return out;
+}
+
+function sanitizeStringNumberRecord(raw: unknown): Record<string, number> {
+  const out: Record<string, number> = {};
+  if (!raw || typeof raw !== 'object') return out;
+  for (const [k, v] of Object.entries(raw as Record<string, unknown>)) {
+    const numVal = Math.max(0, Math.floor(Number(v) || 0));
+    if (k && Number.isFinite(numVal)) {
+      out[k] = numVal;
+    }
+  }
+  return out;
+}
+
 export function createDefaultProgress(seed?: number): SavedProgress {
   return {
     highestUnlockedStage: 1,
     bestScore: 0,
     selectedHeroClass: 'archer',
     evolutionPoints: 2,
-    emberSouls: 10,
+    emberSouls: 15,
     talents: {
       critMastery: 0,
       manaRegen: 0,
@@ -116,6 +155,14 @@ export function createDefaultProgress(seed?: number): SavedProgress {
     },
     heroes: createDefaultHeroRoster(),
     convergenceStages: generateConvergenceStages(seed),
+    enemyKillsByCatalogId: {},
+    discoveredEnemyIds: [1],
+    unlockedAchievements: [],
+    achievementProgress: {},
+    unlockedCosmetics: ['ring:classic', 'fx:standard'],
+    equippedRingSkin: 'classic',
+    equippedFxStyle: 'standard',
+    totalLifetimeKills: 0,
   };
 }
 
@@ -130,6 +177,7 @@ export function loadProgress(): SavedProgress {
       if (legacyRaw) {
         const legacy = JSON.parse(legacyRaw) as Partial<SavedProgress>;
         const migrated: SavedProgress = {
+          ...createDefaultProgress(),
           highestUnlockedStage: Math.max(
             1,
             Math.min(TOTAL_STAGES, Math.floor(Number(legacy.highestUnlockedStage) || 1))
@@ -138,11 +186,6 @@ export function loadProgress(): SavedProgress {
           selectedHeroClass: VALID_HEROES.includes(legacy.selectedHeroClass as HeroClass)
             ? (legacy.selectedHeroClass as HeroClass)
             : 'archer',
-          evolutionPoints: 2,
-          emberSouls: 10,
-          talents: { critMastery: 0, manaRegen: 0, ringReach: 0, towerDiscount: 0 },
-          heroes: createDefaultHeroRoster(),
-          convergenceStages: generateConvergenceStages(),
         };
         saveProgress(migrated);
         return migrated;
@@ -162,7 +205,7 @@ export function loadProgress(): SavedProgress {
       ? (parsed.selectedHeroClass as HeroClass)
       : 'archer';
     const evolutionPoints = Math.max(0, Math.floor(Number(parsed.evolutionPoints) ?? 0));
-    const emberSouls = Math.max(0, Math.floor(Number(parsed.emberSouls) ?? 10));
+    const emberSouls = Math.max(0, Math.floor(Number(parsed.emberSouls) ?? 15));
     const talents = {
       critMastery: Math.max(0, Math.min(5, Math.floor(Number(parsed.talents?.critMastery) || 0))),
       manaRegen: Math.max(0, Math.min(5, Math.floor(Number(parsed.talents?.manaRegen) || 0))),
@@ -176,6 +219,37 @@ export function loadProgress(): SavedProgress {
     };
     const convergenceStages = sanitizeConvergenceStages(parsed.convergenceStages);
 
+    const enemyKillsByCatalogId = sanitizeNumberRecord(parsed.enemyKillsByCatalogId);
+    const discoveredEnemyIds = Array.isArray(parsed.discoveredEnemyIds)
+      ? Array.from(
+          new Set(
+            [1, ...parsed.discoveredEnemyIds.map((n) => Math.floor(Number(n)))].filter(
+              (n) => Number.isFinite(n) && n >= 1 && n <= 50
+            )
+          )
+        )
+      : [1];
+    const unlockedAchievements = Array.isArray(parsed.unlockedAchievements)
+      ? Array.from(new Set(parsed.unlockedAchievements.filter((s): s is string => typeof s === 'string')))
+      : [];
+    const achievementProgress = sanitizeStringNumberRecord(parsed.achievementProgress);
+    const unlockedCosmetics = Array.isArray(parsed.unlockedCosmetics)
+      ? Array.from(
+          new Set([
+            'ring:classic',
+            'fx:standard',
+            ...parsed.unlockedCosmetics.filter((s): s is string => typeof s === 'string'),
+          ])
+        )
+      : ['ring:classic', 'fx:standard'];
+    const equippedRingSkin = VALID_RING_SKINS.includes(parsed.equippedRingSkin as RingSkinId)
+      ? (parsed.equippedRingSkin as RingSkinId)
+      : 'classic';
+    const equippedFxStyle = VALID_FX_STYLES.includes(parsed.equippedFxStyle as FxStyleId)
+      ? (parsed.equippedFxStyle as FxStyleId)
+      : 'standard';
+    const totalLifetimeKills = Math.max(0, Math.floor(Number(parsed.totalLifetimeKills) || 0));
+
     return {
       highestUnlockedStage: stage,
       bestScore,
@@ -185,6 +259,14 @@ export function loadProgress(): SavedProgress {
       talents,
       heroes,
       convergenceStages,
+      enemyKillsByCatalogId,
+      discoveredEnemyIds,
+      unlockedAchievements,
+      achievementProgress,
+      unlockedCosmetics,
+      equippedRingSkin,
+      equippedFxStyle,
+      totalLifetimeKills,
     };
   } catch {
     return createDefaultProgress(7319);
@@ -219,6 +301,20 @@ export function saveProgress(progress: SavedProgress): void {
           bomber: sanitizeHeroSave(progress.heroes.bomber),
         },
         convergenceStages: sanitizeConvergenceStages(progress.convergenceStages),
+        enemyKillsByCatalogId: sanitizeNumberRecord(progress.enemyKillsByCatalogId),
+        discoveredEnemyIds: Array.from(new Set([1, ...(progress.discoveredEnemyIds ?? [])])),
+        unlockedAchievements: Array.from(new Set(progress.unlockedAchievements ?? [])),
+        achievementProgress: sanitizeStringNumberRecord(progress.achievementProgress),
+        unlockedCosmetics: Array.from(
+          new Set(['ring:classic', 'fx:standard', ...(progress.unlockedCosmetics ?? [])])
+        ),
+        equippedRingSkin: VALID_RING_SKINS.includes(progress.equippedRingSkin)
+          ? progress.equippedRingSkin
+          : 'classic',
+        equippedFxStyle: VALID_FX_STYLES.includes(progress.equippedFxStyle)
+          ? progress.equippedFxStyle
+          : 'standard',
+        totalLifetimeKills: Math.max(0, Math.floor(progress.totalLifetimeKills || 0)),
       })
     );
   } catch {

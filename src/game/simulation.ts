@@ -251,7 +251,8 @@ export class GameSimulation {
   public activePacts: string[] = [];
   public ringRotation = 0;
   public ringHeat = 0;
-  public burnZones: { x: number; y: number; radius: number; life: number }[] = [];
+  private bloodPactDrainAccum = 0;
+  public burnZones: { x: number; y: number; radius: number; life: number; damageTimer?: number }[] = [];
   public acidStormZones: { x: number; y: number; radius: number; life: number; damage: number; damageTimer?: number }[] = [];
 
   public get hero(): HeroEntity {
@@ -288,6 +289,9 @@ export class GameSimulation {
     if (this.emberSouls < cost) return false;
     this.emberSouls -= cost;
     this.talents[talentId] = current + 1;
+    for (const h of this.heroes) {
+      this.applySavedStatsToHero(h);
+    }
     this.persistProgress();
     return true;
   }
@@ -298,23 +302,99 @@ export class GameSimulation {
     if (!pact) return false;
     this.activePacts.push(pactId);
     this.pendingPactChoices = null;
+    if (pactId === 'iron') {
+      this.baseMaxHp += 50;
+      this.baseHp = Math.min(this.baseMaxHp, this.baseHp + 50);
+    }
+    for (const u of this.units) {
+      this.recomputeUnitStats(u);
+    }
     this.triggerRewardBanner(`PACTO: ${pact.title}`, pact.description, pact.tone, 1.8);
     return true;
   }
 
+  private getEffectiveUnitCost(kind: UnitKind): number {
+    const baseCost = UNIT_SPECS[kind].cost;
+    const discountLvl = this.talents.towerDiscount ?? 0;
+    const talentMult = Math.max(0.75, 1 - discountLvl * 0.04);
+    const ironMult = this.activePacts.includes('iron') ? 1.15 : 1;
+    return Math.max(10, Math.round(baseCost * talentMult * ironMult));
+  }
+
+  private getSpellCooldownMultiplier(): number {
+    const manaLvl = this.talents.manaRegen ?? 0;
+    const talentMult = Math.max(0.6, 1 - manaLvl * 0.07);
+    const voidMult = this.activePacts.includes('void') ? 0.6 : 1;
+    return talentMult * voidMult;
+  }
+
+  private recomputeUnitStats(unit: UnitEntity) {
+    const spec = UNIT_SPECS[unit.kind];
+    const levelDelta = Math.max(0, unit.level - 1);
+    const baseDmg = spec.damage * Math.pow(1.95, levelDelta);
+    const baseMaxHp = spec.maxHp * Math.pow(1.75, levelDelta);
+    const baseCd = Math.max(0.24, spec.cooldown * Math.pow(0.84, levelDelta));
+    const baseRange = spec.range * (1 + levelDelta * 0.1);
+    const baseCrit = Math.min(0.65, spec.critChance + levelDelta * 0.05);
+
+    const bloodMult = this.activePacts.includes('blood') ? 1.4 : 1;
+    const voidMult = this.activePacts.includes('void') ? 0.85 : 1;
+    const windCdMult = this.activePacts.includes('wind') ? 0.75 : 1;
+    const windRangeMult = this.activePacts.includes('wind') ? 0.9 : 1;
+    const reachBonus = 1 + (this.talents.ringReach ?? 0) * 0.05;
+    const critBonus = (this.talents.critMastery ?? 0) * 0.03;
+
+    const prevMaxHp = unit.maxHp || baseMaxHp;
+    unit.maxHp = Math.round(baseMaxHp);
+    unit.hp = Math.min(unit.maxHp, Math.max(1, Math.round((unit.hp / prevMaxHp) * unit.maxHp)));
+    unit.damage = Math.max(1, Math.round(baseDmg * this.unitUpgradeDamageMult * bloodMult * voidMult));
+    unit.cooldown = Math.max(0.18, Number((baseCd * windCdMult).toFixed(3)));
+    unit.range = Math.round(baseRange * reachBonus * windRangeMult);
+    unit.critChance = Math.min(0.8, baseCrit + critBonus);
+  }
+
   public rotateRing(delta: number) {
+    if (this.phase !== 'playing') return;
     if (this.ringHeat >= 0.95) return;
     this.ringRotation += delta;
     this.ringHeat = Math.min(1, this.ringHeat + 0.15);
+
+    const cx = this.arena.centerX;
+    const cy = this.arena.centerY;
+    const cos = Math.cos(delta);
+    const sin = Math.sin(delta);
+    for (const slot of this.slots) {
+      const dx = slot.x - cx;
+      const dy = slot.y - cy;
+      slot.x = Math.round(cx + dx * cos - dy * sin);
+      slot.y = Math.round(cy + dx * sin + dy * cos);
+      slot.angle += delta;
+      if (slot.unitId !== null) {
+        const u = this.units.find((unit) => unit.id === slot.unitId);
+        if (u) {
+          u.x = slot.x;
+          u.y = slot.y;
+        }
+      }
+      if (slot.hasHero) {
+        for (const h of this.heroes) {
+          if (h.slotId === slot.id) {
+            h.x = slot.x;
+            h.y = slot.y;
+          }
+        }
+      }
+    }
+
     soundEngine.playShieldBash();
     for (const enemy of this.enemies) {
       if (enemy.isDead) continue;
-      const dist = distanceBetween(this.arena.centerX, this.arena.centerY, enemy.x, enemy.y);
-      if (dist <= 220) {
+      const dist = distanceBetween(cx, cy, enemy.x, enemy.y);
+      if (dist <= 240) {
         const branch = this.arena.routes[enemy.routeIndex] ?? this.arena.routes[0];
         const totalLen = this.routeTotalLengths[enemy.routeIndex] ?? this.routeTotalLength;
-        pushEnemyBackAlongRoute(enemy, branch.waypoints, 75, totalLen);
-        this.handleEnemyDamaged(enemy, 35, 0, 0, true, false, undefined);
+        pushEnemyBackAlongRoute(enemy, branch.waypoints, 65, totalLen);
+        this.handleEnemyDamaged(enemy, 24, 0, 0, true, false, undefined);
       }
     }
   }
@@ -354,27 +434,27 @@ export class GameSimulation {
     const base = getHeroStatsForLevel(hero.heroClass, hero.level);
     let dmgMult = 1;
     let cdMult = 1;
-    let rangeMult = 1;
-    let critBonus = 0;
+    let rangeMult = 1 + (this.talents.ringReach ?? 0) * 0.04;
+    let critBonus = (this.talents.critMastery ?? 0) * 0.025;
     let blastMult = 1;
 
     for (const upg of hero.upgradeChoices ?? []) {
       if (upg === 'power') {
-        dmgMult *= 1.28;
-        critBonus += 0.06;
+        dmgMult *= 1.14;
+        critBonus += 0.03;
       } else if (upg === 'haste') {
-        cdMult *= 0.82;
-        rangeMult *= 1.1;
+        cdMult *= 0.88;
+        rangeMult *= 1.06;
       } else if (upg === 'area') {
-        blastMult *= 1.24;
-        dmgMult *= 1.15;
+        blastMult *= 1.16;
+        dmgMult *= 1.1;
       }
     }
 
-    hero.damage = Math.round(base.damage * dmgMult);
-    hero.cooldown = Math.max(0.14, Number((base.cooldown * cdMult).toFixed(3)));
+    hero.damage = Math.max(1, Math.round(base.damage * dmgMult));
+    hero.cooldown = Math.max(0.2, Number((base.cooldown * cdMult).toFixed(3)));
     hero.range = Math.round(base.range * rangeMult);
-    hero.critChance = Math.min(0.84, base.critChance + critBonus);
+    hero.critChance = Math.min(0.6, base.critChance + critBonus);
     hero.blastRadius = base.blastRadius > 0 ? Math.round(base.blastRadius * blastMult) : 0;
   }
 
@@ -483,11 +563,11 @@ export class GameSimulation {
     }
 
     if (upgradeId === 'fortress' && this.phase === 'playing') {
-      this.baseMaxHp += 25;
-      this.baseHp = Math.min(this.baseMaxHp, this.baseHp + 30);
-      this.unitUpgradeDamageMult *= 1.18;
+      this.baseMaxHp += 20;
+      this.baseHp = Math.min(this.baseMaxHp, this.baseHp + 25);
+      this.unitUpgradeDamageMult *= 1.22;
       for (const unit of this.units) {
-        unit.damage = Math.round(unit.damage * 1.18);
+        this.recomputeUnitStats(unit);
       }
     }
 
@@ -580,10 +660,10 @@ export class GameSimulation {
     this.activeBanner = null;
     for (const p of this.particles) p.active = false;
 
-    this.baseHp = this.isConvergenceStage ? 130 : 100;
+    this.baseHp = this.isConvergenceStage ? 120 : 100;
     this.baseMaxHp = this.baseHp;
     this.baseLevel = 1;
-    this.essence = this.isConvergenceStage ? 110 : 85;
+    this.essence = this.isConvergenceStage ? 95 : 70;
     this.essenceCollected = 0;
     this.lastEarnedEvolutionPoints = 0;
     this.score = 0;
@@ -613,6 +693,14 @@ export class GameSimulation {
     this.pendingUpgradeChoices = null;
     this.pendingUpgradeMilestoneLevel = null;
     this.pendingUpgradeHeroClass = null;
+
+    this.pendingPactChoices = null;
+    this.activePacts = [];
+    this.ringRotation = 0;
+    this.ringHeat = 0;
+    this.bloodPactDrainAccum = 0;
+    this.burnZones = [];
+    this.acidStormZones = [];
 
     this.spells = {
       cooldowns: { blade: 0, shockwave: 0, overcharge: 0 },
@@ -662,16 +750,6 @@ export class GameSimulation {
       this.unitUpgradeDamageMult *= 1.12;
       this.heroUpgradesCount += 1;
     }
-
-    // Place 1 starter support defender near the Castle defense zone
-    const unlockedSecondary: UnitKind =
-      this.highestUnlockedStage >= 12
-        ? 'swordsman_ally'
-        : this.highestUnlockedStage >= 6
-          ? 'frog'
-          : 'scout';
-    const lateEmpty = [...this.slots].reverse().find((s) => !s.hasHero && s.unitId === null);
-    if (lateEmpty) this.deployUnitToSlotId(lateEmpty.id, unlockedSecondary, true);
 
     this.startWave(1);
 
@@ -897,14 +975,14 @@ export class GameSimulation {
 
   private castSpinningBlade(x: number, y: number) {
     this.spells.targetingSpell = null;
-    this.spells.cooldowns.blade = this.spells.maxCooldowns.blade;
+    this.spells.cooldowns.blade = this.spells.maxCooldowns.blade * this.getSpellCooldownMultiplier();
     const highestHeroLvl = Math.max(...this.heroes.map((h) => h.level));
 
     this.spinningBlades.push({
       x,
       y,
       radius: 126,
-      damagePerTick: 30 + (highestHeroLvl - 1) * 9,
+      damagePerTick: 24 + (highestHeroLvl - 1) * 5,
       life: 2.7,
       maxLife: 2.7,
       tickTimer: 0,
@@ -930,7 +1008,7 @@ export class GameSimulation {
 
   private castShockwave() {
     this.spells.targetingSpell = null;
-    this.spells.cooldowns.shockwave = this.spells.maxCooldowns.shockwave;
+    this.spells.cooldowns.shockwave = this.spells.maxCooldowns.shockwave * this.getSpellCooldownMultiplier();
 
     this.shockwaves.push({
       x: this.arena.castleX,
@@ -962,7 +1040,7 @@ export class GameSimulation {
 
   private castOvercharge() {
     this.spells.targetingSpell = null;
-    this.spells.cooldowns.overcharge = this.spells.maxCooldowns.overcharge;
+    this.spells.cooldowns.overcharge = this.spells.maxCooldowns.overcharge * this.getSpellCooldownMultiplier();
     this.spells.overchargeTimer = 10;
     this.overchargeTickTimer = 0.5;
 
@@ -978,10 +1056,11 @@ export class GameSimulation {
     const slot = this.slots.find((s) => s.id === slotId);
     if (!slot || slot.unitId !== null || slot.hasHero) return false;
     const spec = UNIT_SPECS[kind];
-    if (!free && this.essence < spec.cost) return false;
+    const effectiveCost = this.getEffectiveUnitCost(kind);
+    if (!free && this.essence < effectiveCost) return false;
 
     if (!free) {
-      this.essence -= spec.cost;
+      this.essence -= effectiveCost;
       soundEngine.playDeploy();
     }
 
@@ -994,7 +1073,7 @@ export class GameSimulation {
       hp: spec.maxHp,
       maxHp: spec.maxHp,
       range: spec.range,
-      damage: Math.round(spec.damage * this.unitUpgradeDamageMult),
+      damage: spec.damage,
       cooldown: spec.cooldown,
       cooldownTimer: Math.random() * 0.15,
       critChance: spec.critChance,
@@ -1004,6 +1083,7 @@ export class GameSimulation {
       hitFlash: 0,
       level: 1,
     };
+    this.recomputeUnitStats(unit);
 
     slot.unitId = unit.id;
     this.units.push(unit);
@@ -1388,6 +1468,7 @@ export class GameSimulation {
       fromSlot.unitId = null;
       this.units = this.units.filter((u) => u.id !== draggedUnit.id);
       applyMergeUpgrade(targetUnit);
+      this.recomputeUnitStats(targetUnit);
 
       this.mergesPerformed += 1;
       this.maxUnitLevelReached = Math.max(this.maxUnitLevelReached, targetUnit.level);
@@ -1447,12 +1528,16 @@ export class GameSimulation {
     const w4 = w3 + this.waveMix.stalker;
     const w5 = w4 + this.waveMix.pyro;
     const w6 = w5 + this.waveMix.titan;
+    const w7 = w6 + this.waveMix.shield_bearer;
+    const w8 = w7 + this.waveMix.corruptor;
     if (r < w1) return 'walker';
     if (r < w2) return 'shielded';
     if (r < w3) return 'brute';
     if (r < w4) return 'stalker';
     if (r < w5) return 'pyro';
     if (r < w6) return 'titan';
+    if (r < w7) return 'shield_bearer';
+    if (r < w8) return 'corruptor';
     return 'reaper';
   }
 
@@ -1486,71 +1571,87 @@ export class GameSimulation {
         : (Math.random() - 0.5) * 18;
     const spawn = computeRouteSpawnPoint(branch.waypoints, laneOffset);
 
-    let baseHp = catalogEntry ? catalogEntry.hp : 50;
-    let baseSpeed = catalogEntry ? catalogEntry.baseSpeed : 53;
+    let baseHp = catalogEntry ? catalogEntry.hp : 55;
+    let baseSpeed = catalogEntry ? catalogEntry.baseSpeed : 56;
     let radius = catalogEntry ? catalogEntry.radius : 17;
-    let damage = catalogEntry ? catalogEntry.damage : 12;
+    let damage = catalogEntry ? catalogEntry.damage : 14;
     let attackCooldown = 1.05;
     let rewardScore = catalogEntry ? 15 + catalogEntry.id * 4 : 15;
-    let xpReward = catalogEntry ? 10 + Math.floor(catalogEntry.id * 1.1) : 10;
+    let xpReward = catalogEntry ? 14 + Math.floor(catalogEntry.id * 1.2) : 14;
 
     if (!catalogEntry) {
       if (kind === 'shielded') {
-        baseHp = 75;
-        baseSpeed = 42;
+        baseHp = 88;
+        baseSpeed = 44;
         radius = 20;
-        damage = 16;
+        damage = 18;
         attackCooldown = 1.15;
         rewardScore = 25;
-        xpReward = 15;
+        xpReward = 18;
       } else if (kind === 'brute') {
-        baseHp = 115;
-        baseSpeed = 46;
+        baseHp = 135;
+        baseSpeed = 48;
         radius = 22;
-        damage = 22;
+        damage = 24;
         attackCooldown = 1.2;
         rewardScore = 40;
-        xpReward = 22;
+        xpReward = 26;
       } else if (kind === 'stalker') {
-        baseHp = 65;
-        baseSpeed = 82;
+        baseHp = 75;
+        baseSpeed = 86;
         radius = 16;
-        damage = 15;
+        damage = 16;
         attackCooldown = 0.9;
         rewardScore = 45;
-        xpReward = 24;
+        xpReward = 28;
       } else if (kind === 'pyro') {
-        baseHp = 95;
-        baseSpeed = 64;
+        baseHp = 110;
+        baseSpeed = 66;
         radius = 18;
-        damage = 20;
+        damage = 22;
         attackCooldown = 1.0;
         rewardScore = 55;
-        xpReward = 28;
+        xpReward = 32;
       } else if (kind === 'titan') {
-        baseHp = 220;
-        baseSpeed = 34;
+        baseHp = 260;
+        baseSpeed = 35;
         radius = 27;
-        damage = 28;
+        damage = 30;
         attackCooldown = 1.3;
         rewardScore = 80;
-        xpReward = 42;
+        xpReward = 48;
+      } else if (kind === 'shield_bearer') {
+        baseHp = 175;
+        baseSpeed = 40;
+        radius = 23;
+        damage = 20;
+        attackCooldown = 1.2;
+        rewardScore = 70;
+        xpReward = 38;
+      } else if (kind === 'corruptor') {
+        baseHp = 125;
+        baseSpeed = 54;
+        radius = 19;
+        damage = 24;
+        attackCooldown = 1.05;
+        rewardScore = 75;
+        xpReward = 40;
       } else if (kind === 'reaper') {
-        baseHp = 260;
-        baseSpeed = 48;
+        baseHp = 290;
+        baseSpeed = 50;
         radius = 25;
-        damage = 32;
+        damage = 34;
         attackCooldown = 1.1;
         rewardScore = 95;
-        xpReward = 50;
+        xpReward = 55;
       } else if (kind === 'boss') {
         baseHp = this.waveBossHp;
-        baseSpeed = 33;
+        baseSpeed = 35;
         radius = 34;
-        damage = 32 + Math.round(this.currentStage * 1.2);
+        damage = 36 + Math.round(this.currentStage * 1.4);
         attackCooldown = 1.25;
         rewardScore = 220 + this.currentStage * 20;
-        xpReward = 85;
+        xpReward = 95;
       }
     } else if (kind === 'boss') {
       baseHp =
@@ -1558,20 +1659,19 @@ export class GameSimulation {
           ? 25000
           : Math.max(this.waveBossHp, catalogEntry.hp);
       radius = Math.max(30, catalogEntry.radius);
-      xpReward = 85 + Math.floor(catalogEntry.id * 1.5);
+      xpReward = 95 + Math.floor(catalogEntry.id * 1.5);
     }
 
     const rewardEssence = computeEnemyEssenceReward(kind, this.currentStage, false);
     const waveScale =
       kind === 'boss'
         ? 1
-        : (1 + (this.wave - 1) * 0.14 + Math.max(0, this.currentStage - (catalogEntry?.unlockStage ?? 1)) * 0.025) *
-          (this.isConvergenceStage ? 1.28 : 1);
+        : Math.max(1, this.waveHpMult) *
+          (1 + Math.max(0, this.currentStage - (catalogEntry?.unlockStage ?? 1)) * 0.025);
     const hp = Math.round(baseHp * waveScale);
     const speed =
       baseSpeed *
-      Math.min(1.45, 1 + (this.wave - 1) * 0.04 + this.currentStage * 0.003) *
-      (this.isConvergenceStage ? 1.06 : 1);
+      Math.min(1.55, this.waveSpeedMult * (1 + (this.wave - 1) * 0.03));
 
     const isBoss = kind === 'boss' || Boolean(catalogEntry?.isBoss);
     const isElite = isEliteEnemy({ kind, isElite: Boolean(catalogEntry?.isElite), isBoss });
@@ -1717,12 +1817,60 @@ export class GameSimulation {
 
     if (this.phase !== 'playing') return;
 
-    if (this.pendingUpgradeChoices) {
+    if (this.pendingUpgradeChoices || this.pendingPactChoices) {
       this.updateVisualEffects(dt);
       return;
     }
 
     this.survivalSeconds += dt;
+    this.ringHeat = Math.max(0, this.ringHeat - dt * 0.12);
+
+    if (this.activePacts.includes('blood')) {
+      this.bloodPactDrainAccum += dt * 0.8;
+      if (this.bloodPactDrainAccum >= 1) {
+        const drain = Math.floor(this.bloodPactDrainAccum);
+        this.bloodPactDrainAccum -= drain;
+        this.baseHp = Math.max(1, this.baseHp - drain);
+      }
+    }
+
+    // Update ground burn zones and acid storm zones
+    for (let i = this.burnZones.length - 1; i >= 0; i--) {
+      const bz = this.burnZones[i];
+      bz.life -= dt;
+      bz.damageTimer = (bz.damageTimer ?? 0.35) - dt;
+      if (bz.damageTimer <= 0) {
+        bz.damageTimer = 0.55;
+        for (const enemy of this.enemies) {
+          if (enemy.isDead) continue;
+          if (distanceBetween(bz.x, bz.y, enemy.x, enemy.y) <= bz.radius + enemy.radius) {
+            this.handleEnemyDamaged(enemy, 10 + Math.round(this.currentStage * 0.4), 0, 0, false, false, undefined);
+          }
+        }
+      }
+      if (bz.life <= 0) {
+        this.burnZones.splice(i, 1);
+      }
+    }
+    for (let i = this.acidStormZones.length - 1; i >= 0; i--) {
+      const az = this.acidStormZones[i];
+      az.life -= dt;
+      az.damageTimer = (az.damageTimer ?? 0) - dt;
+      if (az.damageTimer <= 0) {
+        az.damageTimer = 0.45;
+        for (const enemy of this.enemies) {
+          if (enemy.isDead) continue;
+          if (distanceBetween(az.x, az.y, enemy.x, enemy.y) <= az.radius + enemy.radius) {
+            enemy.corrosionTimer = Math.max(enemy.corrosionTimer ?? 0, 2.5);
+            enemy.slowTimer = Math.max(enemy.slowTimer ?? 0, 1.5);
+            this.handleEnemyDamaged(enemy, az.damage, 0, 0, true, false, undefined);
+          }
+        }
+      }
+      if (az.life <= 0) {
+        this.acidStormZones.splice(i, 1);
+      }
+    }
 
     if (this.activeBanner) {
       this.activeBanner.life -= dt;
@@ -1869,6 +2017,7 @@ export class GameSimulation {
     } else if (this.enemies.length === 0 && this.hordeWarnings.length === 0) {
       if (this.wave >= this.totalWavesInStage) {
         this.phase = 'victory';
+        this.emberSouls += 3 + Math.floor(this.currentStage / 5);
         this.highestUnlockedStage = unlockNextStage(this.currentStage, this.highestUnlockedStage);
         this.bestScore = Math.max(this.bestScore, this.score);
         this.persistProgress();
@@ -1878,6 +2027,12 @@ export class GameSimulation {
       }
       this.waveBreakTimer += dt;
       if (this.waveBreakTimer >= 1.25) {
+        if (this.wave % 5 === 0 && !this.pendingPactChoices) {
+          const available = PACT_POOL.filter((p) => !this.activePacts.includes(p.id));
+          if (available.length > 0) {
+            this.pendingPactChoices = available.slice(0, 3);
+          }
+        }
         this.persistProgress();
         this.startWave(this.wave + 1);
       }
@@ -1902,9 +2057,13 @@ export class GameSimulation {
       }
     }
 
-    // 2B. Support Defenders Auto-Combat
+    // 2B. Support Defenders Auto-Combat (Corruptor enemies slow nearby tower cooldown recovery)
     for (const unit of this.units) {
-      unit.cooldownTimer = Math.max(0, unit.cooldownTimer - dt);
+      const isCorrupted = this.enemies.some(
+        (e) => !e.isDead && e.kind === 'corruptor' && distanceBetween(e.x, e.y, unit.x, unit.y) <= 150
+      );
+      const cdRate = isCorrupted ? 0.68 : 1;
+      unit.cooldownTimer = Math.max(0, unit.cooldownTimer - dt * cdRate);
       unit.attackAnim = Math.max(0, unit.attackAnim - dt * 4);
       unit.recoil = Math.max(0, unit.recoil - dt * 6);
       unit.hitFlash = Math.max(0, unit.hitFlash - dt);
@@ -2115,15 +2274,21 @@ export class GameSimulation {
       const baseAngle = Math.atan2(target.y - hero.y, target.x - hero.x);
       const speed = 640;
       const volleyAngles =
-        hero.level >= 12
+        hero.level >= 22
           ? [-0.16, -0.055, 0.055, 0.16]
-          : hero.level >= 8
+          : hero.level >= 14
             ? [-0.14, 0, 0.14]
-            : hero.level >= 4
+            : hero.level >= 6
               ? [-0.08, 0.08]
               : [0];
       const arrowDamageMult =
-        volleyAngles.length >= 3 ? 0.75 : volleyAngles.length === 2 ? 0.8 : 1;
+        volleyAngles.length === 4
+          ? 0.34
+          : volleyAngles.length === 3
+            ? 0.42
+            : volleyAngles.length === 2
+              ? 0.58
+              : 1;
       const arrowDamage = Math.max(1, Math.round(hero.damage * arrowDamageMult));
 
       for (const offsetAngle of volleyAngles) {
@@ -2403,6 +2568,9 @@ export class GameSimulation {
         isPiercing: true,
         hitIds: [],
       });
+      if (this.burnZones.length < 12) {
+        this.burnZones.push({ x: target.x, y: target.y, radius: 58, life: 4.0 });
+      }
       soundEngine.playBombLaunch();
       this.spawnTypedParticles(unit.x + (dx / dist) * 18, unit.y + (dy / dist) * 18, 7, 'spark', '#F97316', 110, 0.3);
     } else if (unit.kind === 'cleric') {
@@ -2505,6 +2673,31 @@ export class GameSimulation {
         maxLife: 0.42,
         color: '#84CC16',
       });
+      // Elemental Synergy: Spore Witch mist + Fire Mage burn zone = Acid Storm!
+      for (let bi = this.burnZones.length - 1; bi >= 0; bi--) {
+        const bz = this.burnZones[bi];
+        if (distanceBetween(unit.x, unit.y, bz.x, bz.y) <= unit.range + bz.radius) {
+          this.acidStormZones.push({
+            x: bz.x,
+            y: bz.y,
+            radius: 78,
+            life: 4.5,
+            damage: Math.max(12, Math.round(effectiveDamage * 0.6)),
+            damageTimer: 0.1,
+          });
+          this.burnZones.splice(bi, 1);
+          this.floatingTexts.push({
+            x: bz.x,
+            y: bz.y - 24,
+            vy: -28,
+            text: 'NÉVOA ÁCIDA!',
+            color: '#A3E635',
+            scale: 1.15,
+            life: 1.0,
+            maxLife: 1.0,
+          });
+        }
+      }
       for (const enemy of this.enemies) {
         if (enemy.isDead) continue;
         enemy.slowTimer = Math.max(enemy.slowTimer ?? 0, 3.2);
@@ -2554,7 +2747,21 @@ export class GameSimulation {
     attackerHeroClass: HeroClass | undefined
   ) {
     const byHero = attackerHeroClass !== undefined;
-    const res = applyDamageToEnemy(enemy, damage, { byHero });
+    let adjustedDamage = damage;
+    if (isCrit && (this.talents.critMastery ?? 0) > 0) {
+      adjustedDamage = Math.round(adjustedDamage * (1 + (this.talents.critMastery ?? 0) * 0.08));
+    }
+    const nearbyShieldBearer = this.enemies.some(
+      (e) =>
+        !e.isDead &&
+        e.id !== enemy.id &&
+        e.kind === 'shield_bearer' &&
+        distanceBetween(e.x, e.y, enemy.x, enemy.y) <= 95
+    );
+    if (nearbyShieldBearer) {
+      adjustedDamage = Math.max(1, Math.round(adjustedDamage * 0.75));
+    }
+    const res = applyDamageToEnemy(enemy, adjustedDamage, { byHero });
     if (res.actualDamage <= 0) return;
 
     enemy.knockbackVx += knockX * (enemy.kind === 'boss' ? 0.22 : 1);
@@ -2595,6 +2802,11 @@ export class GameSimulation {
 
       const isElite = isEliteEnemy(enemy);
       const isBoss = enemy.kind === 'boss' || Boolean(enemy.isBoss);
+      if (isBoss) {
+        this.emberSouls += 5;
+      } else if (isElite) {
+        this.emberSouls += 1;
+      }
 
       this.hitstopTimer = Math.max(
         this.hitstopTimer,

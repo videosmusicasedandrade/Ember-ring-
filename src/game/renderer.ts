@@ -294,6 +294,59 @@ export class ArenaRenderer {
 
     ctx.drawImage(staticLayer, 0, 0);
 
+    // 0.5 Modular Ember Ring Visual Guide & Elemental Ground Zones
+    if (sim.ringRotation !== 0 || sim.ringHeat > 0.01) {
+      ctx.save();
+      ctx.translate(arena.centerX, arena.centerY);
+      ctx.rotate(sim.ringRotation);
+      ctx.strokeStyle =
+        sim.ringHeat > 0.75
+          ? 'rgba(255, 46, 76, 0.35)'
+          : 'rgba(250, 204, 21, 0.22)';
+      ctx.lineWidth = 2.5;
+      ctx.setLineDash([12, 10]);
+      ctx.beginPath();
+      ctx.arc(0, 0, 210, 0, Math.PI * 2);
+      ctx.stroke();
+      ctx.setLineDash([]);
+      ctx.restore();
+    }
+
+    for (const bz of sim.burnZones) {
+      const alpha = Math.min(0.65, (bz.life / 4.0) * 0.65);
+      ctx.save();
+      ctx.globalAlpha = alpha;
+      const grad = ctx.createRadialGradient(bz.x, bz.y, 4, bz.x, bz.y, bz.radius);
+      grad.addColorStop(0, 'rgba(250, 204, 21, 0.85)');
+      grad.addColorStop(0.55, 'rgba(249, 115, 22, 0.55)');
+      grad.addColorStop(1, 'rgba(220, 38, 38, 0)');
+      ctx.fillStyle = grad;
+      ctx.beginPath();
+      ctx.arc(bz.x, bz.y, bz.radius, 0, Math.PI * 2);
+      ctx.fill();
+      ctx.restore();
+    }
+
+    for (const az of sim.acidStormZones) {
+      const alpha = Math.min(0.75, (az.life / 4.5) * 0.75);
+      ctx.save();
+      ctx.globalAlpha = alpha;
+      const grad = ctx.createRadialGradient(az.x, az.y, 6, az.x, az.y, az.radius);
+      grad.addColorStop(0, 'rgba(190, 242, 100, 0.75)');
+      grad.addColorStop(0.6, 'rgba(16, 185, 129, 0.45)');
+      grad.addColorStop(1, 'rgba(6, 78, 59, 0)');
+      ctx.fillStyle = grad;
+      ctx.beginPath();
+      ctx.arc(az.x, az.y, az.radius, 0, Math.PI * 2);
+      ctx.fill();
+      ctx.strokeStyle = '#A3E635';
+      ctx.lineWidth = 2;
+      ctx.setLineDash([6, 5]);
+      ctx.stroke();
+      ctx.setLineDash([]);
+      ctx.restore();
+    }
+
     // 1. Tactical Defender Pad Slots
     const drag = sim.dragState;
     const draggedUnit =
@@ -1992,6 +2045,75 @@ export class ArenaRenderer {
         ctx.fillStyle = cAccent ?? '#FACC15';
         ctx.fillRect(-10, 0 + shieldRaise, 8, 5);
       }
+    } else if (enemy.kind === 'shield_bearer') {
+      if (!enemy.isDead) {
+        ctx.save();
+        ctx.strokeStyle = 'rgba(0, 212, 255, 0.25)';
+        ctx.lineWidth = 2;
+        ctx.setLineDash([5, 5]);
+        ctx.beginPath();
+        ctx.arc(0, 0, 95, 0, Math.PI * 2);
+        ctx.stroke();
+        ctx.setLineDash([]);
+        ctx.restore();
+      }
+      ctx.fillStyle = flash ? '#FFFFFF' : cSecondary ?? '#1E3A8A';
+      ctx.strokeStyle = '#020617';
+      ctx.lineWidth = 2.8;
+      ctx.beginPath();
+      ctx.roundRect(-15, -8, 30, 24, 6);
+      ctx.fill();
+      ctx.stroke();
+
+      ctx.fillStyle = flash ? '#FFFFFF' : cPrimary ?? '#0284C7';
+      ctx.beginPath();
+      ctx.arc(0, -16, 12, 0, Math.PI * 2);
+      ctx.fill();
+      ctx.stroke();
+      this.drawZombieFace(ctx, 0, -16);
+
+      ctx.fillStyle = flash ? '#FFFFFF' : '#38BDF8';
+      ctx.beginPath();
+      ctx.roundRect(-18, -12, 16, 28, 5);
+      ctx.fill();
+      ctx.stroke();
+      ctx.fillStyle = '#FACC15';
+      ctx.fillRect(-13, -3, 6, 10);
+    } else if (enemy.kind === 'corruptor') {
+      if (!enemy.isDead) {
+        ctx.save();
+        ctx.strokeStyle = 'rgba(168, 85, 247, 0.28)';
+        ctx.lineWidth = 2;
+        ctx.setLineDash([4, 4]);
+        ctx.beginPath();
+        ctx.arc(0, 0, 150, 0, Math.PI * 2);
+        ctx.stroke();
+        ctx.setLineDash([]);
+        ctx.restore();
+      }
+      ctx.fillStyle = flash ? '#FFFFFF' : cSecondary ?? '#3B0764';
+      ctx.strokeStyle = '#020617';
+      ctx.lineWidth = 2.5;
+      ctx.beginPath();
+      ctx.moveTo(-14, 15);
+      ctx.lineTo(-9, -9);
+      ctx.lineTo(9, -9);
+      ctx.lineTo(14, 15);
+      ctx.closePath();
+      ctx.fill();
+      ctx.stroke();
+
+      ctx.fillStyle = flash ? '#FFFFFF' : cPrimary ?? '#9333EA';
+      ctx.beginPath();
+      ctx.arc(0, -14, 11, 0, Math.PI * 2);
+      ctx.fill();
+      ctx.stroke();
+
+      ctx.fillStyle = cAccent ?? '#E879F9';
+      ctx.beginPath();
+      ctx.arc(-3.5, -14, 2.5, 0, Math.PI * 2);
+      ctx.arc(3.5, -14, 2.5, 0, Math.PI * 2);
+      ctx.fill();
     } else if (enemy.kind === 'boss') {
       ctx.fillStyle = flash ? '#FFFFFF' : cSecondary ?? '#991B1B';
       ctx.strokeStyle = '#020617';

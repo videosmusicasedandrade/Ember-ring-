@@ -2,8 +2,11 @@ class SoundEngine {
   private ctx: AudioContext | null = null;
   public mutedMusic = false;
   public mutedSfx = false;
-  private musicTimer: ReturnType<typeof setInterval> | null = null;
+  private musicTimer: ReturnType<typeof setTimeout> | null = null;
   private musicStep = 0;
+  private musicRunning = false;
+  private currentWave = 1;
+  private isBossIntensity = false;
 
   private ensureContext(): AudioContext | null {
     if (typeof window === 'undefined') return null;
@@ -31,49 +34,72 @@ class SoundEngine {
     this.mutedSfx = muted;
   }
 
-  public startMusic() {
-    if (this.mutedMusic || this.musicTimer || typeof window === 'undefined') return;
-    // Driving minor pentatonic synth arpeggio for high-focus dark-arena flow
-    const lead = [220, 261.63, 329.63, 392.0, 440.0, 392.0, 329.63, 293.66];
+  public setMusicIntensity(wave: number, bossActive: boolean) {
+    this.currentWave = Math.max(1, wave);
+    this.isBossIntensity = bossActive;
+  }
+
+  private getMusicStepIntervalMs(): number {
+    if (this.isBossIntensity) return 210;
+    if (this.currentWave >= 8) return 245;
+    if (this.currentWave >= 5) return 290;
+    return 355;
+  }
+
+  private scheduleMusicStep() {
+    if (!this.musicRunning || this.mutedMusic || typeof window === 'undefined') return;
+    const leadNormal = [220, 261.63, 329.63, 392.0, 440.0, 392.0, 329.63, 293.66];
+    const leadIntense = [220, 261.63, 329.63, 440.0, 493.88, 440.0, 349.23, 329.63];
     const bass = [110, 110, 130.81, 98.0];
 
-    this.musicTimer = setInterval(() => {
-      if (this.mutedMusic) return;
+    const stepMs = this.getMusicStepIntervalMs();
+    this.musicTimer = setTimeout(() => {
+      if (!this.musicRunning || this.mutedMusic) return;
       const ctx = this.ensureContext();
-      if (!ctx || ctx.state !== 'running') return;
+      if (ctx && ctx.state === 'running') {
+        const now = ctx.currentTime;
+        const intense = this.isBossIntensity || this.currentWave >= 8;
+        const melodyPool = intense ? leadIntense : leadNormal;
+        const melodyFreq = melodyPool[this.musicStep % melodyPool.length];
+        const osc = ctx.createOscillator();
+        const gain = ctx.createGain();
+        osc.type = intense ? 'sawtooth' : 'triangle';
+        osc.frequency.setValueAtTime(melodyFreq, now);
+        gain.gain.setValueAtTime(intense ? 0.02 : 0.022, now);
+        gain.gain.exponentialRampToValueAtTime(0.001, now + (intense ? 0.21 : 0.28));
+        osc.connect(gain).connect(ctx.destination);
+        osc.start(now);
+        osc.stop(now + 0.3);
 
-      const now = ctx.currentTime;
-      const melodyFreq = lead[this.musicStep % lead.length];
-      const osc = ctx.createOscillator();
-      const gain = ctx.createGain();
-      osc.type = 'triangle';
-      osc.frequency.setValueAtTime(melodyFreq, now);
-      gain.gain.setValueAtTime(0.022, now);
-      gain.gain.exponentialRampToValueAtTime(0.001, now + 0.28);
-      osc.connect(gain).connect(ctx.destination);
-      osc.start(now);
-      osc.stop(now + 0.3);
+        if (this.musicStep % (intense ? 1 : 2) === 0) {
+          const bassFreq = bass[Math.floor(this.musicStep / 2) % bass.length];
+          const bOsc = ctx.createOscillator();
+          const bGain = ctx.createGain();
+          bOsc.type = intense ? 'triangle' : 'sine';
+          bOsc.frequency.setValueAtTime(intense && this.musicStep % 2 === 1 ? bassFreq * 1.5 : bassFreq, now);
+          bGain.gain.setValueAtTime(intense ? 0.048 : 0.036, now);
+          bGain.gain.exponentialRampToValueAtTime(0.001, now + (intense ? 0.24 : 0.38));
+          bOsc.connect(bGain).connect(ctx.destination);
+          bOsc.start(now);
+          bOsc.stop(now + 0.4);
+        }
 
-      if (this.musicStep % 2 === 0) {
-        const bassFreq = bass[Math.floor(this.musicStep / 2) % bass.length];
-        const bOsc = ctx.createOscillator();
-        const bGain = ctx.createGain();
-        bOsc.type = 'sine';
-        bOsc.frequency.setValueAtTime(bassFreq, now);
-        bGain.gain.setValueAtTime(0.036, now);
-        bGain.gain.exponentialRampToValueAtTime(0.001, now + 0.38);
-        bOsc.connect(bGain).connect(ctx.destination);
-        bOsc.start(now);
-        bOsc.stop(now + 0.4);
+        this.musicStep = (this.musicStep + 1) % 16;
       }
+      this.scheduleMusicStep();
+    }, stepMs);
+  }
 
-      this.musicStep = (this.musicStep + 1) % 16;
-    }, 360);
+  public startMusic() {
+    if (this.mutedMusic || this.musicRunning || typeof window === 'undefined') return;
+    this.musicRunning = true;
+    this.scheduleMusicStep();
   }
 
   public stopMusic() {
+    this.musicRunning = false;
     if (this.musicTimer) {
-      clearInterval(this.musicTimer);
+      clearTimeout(this.musicTimer);
       this.musicTimer = null;
     }
   }
@@ -557,6 +583,84 @@ class SoundEngine {
       osc.connect(gain).connect(ctx.destination);
       osc.start(t);
       osc.stop(t + 0.38);
+    });
+  }
+
+  public playShieldHit() {
+    const ctx = this.getSfxCtx();
+    if (!ctx) return;
+    const now = ctx.currentTime;
+    const osc = ctx.createOscillator();
+    const gain = ctx.createGain();
+    osc.type = 'square';
+    osc.frequency.setValueAtTime(1120, now);
+    osc.frequency.exponentialRampToValueAtTime(340, now + 0.085);
+    gain.gain.setValueAtTime(0.065, now);
+    gain.gain.exponentialRampToValueAtTime(0.001, now + 0.095);
+    osc.connect(gain).connect(ctx.destination);
+    osc.start(now);
+    osc.stop(now + 0.1);
+  }
+
+  public playElementalCombustion() {
+    const ctx = this.getSfxCtx();
+    if (!ctx) return;
+    const now = ctx.currentTime;
+
+    const boom = ctx.createOscillator();
+    const boomGain = ctx.createGain();
+    boom.type = 'sawtooth';
+    boom.frequency.setValueAtTime(170, now);
+    boom.frequency.exponentialRampToValueAtTime(42, now + 0.34);
+    boomGain.gain.setValueAtTime(0.14, now);
+    boomGain.gain.exponentialRampToValueAtTime(0.001, now + 0.36);
+    boom.connect(boomGain).connect(ctx.destination);
+    boom.start(now);
+    boom.stop(now + 0.38);
+
+    const sizzle = ctx.createOscillator();
+    const sizzleGain = ctx.createGain();
+    sizzle.type = 'triangle';
+    sizzle.frequency.setValueAtTime(840, now + 0.03);
+    sizzle.frequency.exponentialRampToValueAtTime(1560, now + 0.24);
+    sizzleGain.gain.setValueAtTime(0.075, now + 0.03);
+    sizzleGain.gain.exponentialRampToValueAtTime(0.001, now + 0.26);
+    sizzle.connect(sizzleGain).connect(ctx.destination);
+    sizzle.start(now + 0.03);
+    sizzle.stop(now + 0.28);
+  }
+
+  public playCritImpact() {
+    const ctx = this.getSfxCtx();
+    if (!ctx) return;
+    const now = ctx.currentTime;
+    const osc = ctx.createOscillator();
+    const gain = ctx.createGain();
+    osc.type = 'sawtooth';
+    osc.frequency.setValueAtTime(980, now);
+    osc.frequency.exponentialRampToValueAtTime(420, now + 0.085);
+    gain.gain.setValueAtTime(0.075, now);
+    gain.gain.exponentialRampToValueAtTime(0.001, now + 0.095);
+    osc.connect(gain).connect(ctx.destination);
+    osc.start(now);
+    osc.stop(now + 0.1);
+  }
+
+  public playAchievement() {
+    const ctx = this.getSfxCtx();
+    if (!ctx) return;
+    const now = ctx.currentTime;
+    [587.33, 739.99, 880.0, 1174.66].forEach((freq, i) => {
+      const osc = ctx.createOscillator();
+      const gain = ctx.createGain();
+      osc.type = 'triangle';
+      const t = now + i * 0.075;
+      osc.frequency.setValueAtTime(freq, t);
+      gain.gain.setValueAtTime(0.11, t);
+      gain.gain.exponentialRampToValueAtTime(0.001, t + 0.4);
+      osc.connect(gain).connect(ctx.destination);
+      osc.start(t);
+      osc.stop(t + 0.42);
     });
   }
 }

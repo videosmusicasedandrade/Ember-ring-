@@ -235,24 +235,25 @@ test('Enemy Album (50) unlocks every 2-5 stages and Ally Album (10) unlocks ever
   assert.equal(getUnlockedAlliesForStage(79).length, 10);
 });
 
-test('Hero Lv 1 base damage requires 3-6 hits on common enemies and scales strongly with XP levels', () => {
+test('Hero levels up fast with XP thresholds, while combat power grows modestly so merged units are essential', () => {
   assert.equal(getHeroLevelFromXp(0), 1);
   assert.equal(getHeroLevelFromXp(HERO_XP_THRESHOLDS[1]), 2);
+  assert.ok(HERO_XP_THRESHOLDS[4] <= 100, 'Lv5 should be reachable quickly via fast XP thresholds');
   assert.equal(getHeroLevelFromXp(9999), MAX_HERO_LEVEL);
 
   for (const heroClass of ['archer', 'swordsman', 'bomber'] as const) {
     const lv1 = getHeroStatsForLevel(heroClass, 1);
     const hitsForRat = Math.ceil(50 / lv1.damage);
     assert.ok(
-      hitsForRat >= 3 && hitsForRat <= 6,
-      `Lv1 ${heroClass} (dmg=${lv1.damage}) should take 3-6 hits vs 50 HP common enemy, got ${hitsForRat}`
+      hitsForRat >= 4 && hitsForRat <= 8,
+      `Lv1 ${heroClass} (dmg=${lv1.damage}) should take 4-8 hits vs 50 HP common enemy, got ${hitsForRat}`
     );
     const lv5 = getHeroStatsForLevel(heroClass, 5);
     const lv10 = getHeroStatsForLevel(heroClass, 10);
     const lv15 = getHeroStatsForLevel(heroClass, 15);
-    assert.ok(lv5.damage >= lv1.damage * 2);
-    assert.ok(lv10.damage >= lv5.damage * 2.5);
-    assert.ok(lv15.damage >= lv1.damage * 15);
+    assert.ok(lv5.damage > lv1.damage && lv5.damage < lv1.damage * 2, 'Lv5 hero power should rise modestly');
+    assert.ok(lv10.damage > lv5.damage && lv10.damage < lv1.damage * 2.5, 'Lv10 hero should not solo waves');
+    assert.ok(lv15.damage > lv10.damage && lv15.damage < lv1.damage * 3, 'Lv15 hero growth stays bounded');
     assert.ok(lv5.cooldown < lv1.cooldown);
     assert.ok(lv5.range > lv1.range);
   }
@@ -476,7 +477,7 @@ test('applyDamageToEnemy differentiates resistance across common, armored, titan
   assert.equal(hitBraced.killed, false);
 
   const hitBossByHero = applyDamageToEnemy(boss, 20, { byHero: true });
-  assert.equal(hitBossByHero.actualDamage, 8);
+  assert.equal(hitBossByHero.actualDamage, 6);
 
   shielded.corrosionTimer = 2;
   const corrodedHit = applyDamageToEnemy(shielded, 10, { byHero: true });
@@ -663,10 +664,58 @@ test('all UNIT_SPECS define valid damage, range, and attack speed for tooltip ov
   assert.equal(sniperSpec.range, 460);
   assert.equal((1 / sniperSpec.cooldown).toFixed(1), '0.8');
 
-  // Verify Paladin aura bonus damage calculation (+25%)
+  // Verify Paladin aura bonus damage calculation (+25% / +20% simulation aura)
   const boostedScoutDamage = Math.round(scoutSpec.damage * 1.25);
   assert.equal(boostedScoutDamage, 14);
 });
 
+test('applyMergeUpgrade scales fighter power drastically faster than Hero levels', () => {
+  const unit = makeUnit({
+    id: 20,
+    kind: 'scout',
+    level: 1,
+    damage: UNIT_SPECS.scout.damage,
+    maxHp: UNIT_SPECS.scout.maxHp,
+  });
+  const lv1Dmg = unit.damage;
+  applyMergeUpgrade(unit); // Lv.2
+  applyMergeUpgrade(unit); // Lv.3
+  assert.equal(unit.level, 3);
+  assert.ok(
+    unit.damage >= lv1Dmg * 3.5,
+    `Merged Lv.3 unit dmg (${unit.damage}) should be >= 3.5x Lv.1 (${lv1Dmg})`
+  );
+});
 
+test('GameSimulation supports Ember Soul talents, Pact choices, and 360-degree Ring rotation', () => {
+  const sim = new GameSimulation();
+  sim.resetWorld('playing', 1, 'archer');
+
+  // No free starter unit on board — player must recruit & merge
+  assert.equal(sim.units.length, 0);
+
+  // Talent upgrade consumes emberSouls and increments talent level
+  sim.emberSouls = 20;
+  const startCrit = sim.talents.critMastery ?? 0;
+  const upgraded = sim.upgradeTalent('critMastery');
+  assert.equal(upgraded, true);
+  assert.equal(sim.talents.critMastery, startCrit + 1);
+  assert.ok(sim.emberSouls < 20);
+
+  // Rotate ring shifts slot positions and increases ringHeat
+  const firstSlotBefore = { x: sim.slots[0].x, y: sim.slots[0].y };
+  sim.rotateRing(Math.PI * 0.25);
+  assert.ok(sim.ringHeat > 0);
+  assert.ok(sim.slots[0].x !== firstSlotBefore.x || sim.slots[0].y !== firstSlotBefore.y);
+
+  // Pact selection updates activePacts and applies Iron Pact +50 HP
+  sim.pendingPactChoices = [
+    { id: 'iron', title: 'Pacto de Ferro', description: '+50 HP máximo', tone: 'gold' },
+  ];
+  const prevMaxHp = sim.baseMaxHp;
+  assert.equal(sim.selectPact('iron'), true);
+  assert.equal(sim.pendingPactChoices, null);
+  assert.ok(sim.activePacts.includes('iron'));
+  assert.equal(sim.baseMaxHp, prevMaxHp + 50);
+});
 

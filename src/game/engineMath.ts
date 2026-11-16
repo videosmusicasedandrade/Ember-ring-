@@ -984,17 +984,17 @@ export function getStageConfig(
     isConvergenceStage,
     totalWaves,
     baseEnemiesPerWave:
-      Math.min(34, 8 + Math.round(stage * 0.65)) + (isConvergenceStage ? 6 : 0),
-    hpMultiplier: (1 + (stage - 1) * 0.085) * (isConvergenceStage ? 1.38 : 1),
-    speedMultiplier: Math.min(1.72, 1.04 + (stage - 1) * 0.008) * (isConvergenceStage ? 1.06 : 1),
+      Math.min(42, 12 + Math.round(stage * 0.85)) + (isConvergenceStage ? 8 : 0),
+    hpMultiplier: (1.28 + (stage - 1) * 0.13) * (isConvergenceStage ? 1.42 : 1),
+    speedMultiplier: Math.min(1.78, 1.08 + (stage - 1) * 0.008) * (isConvergenceStage ? 1.06 : 1),
     spawnInterval: Math.max(
-      0.28,
-      (1.14 - (stage - 1) * 0.012) * (isConvergenceStage ? 0.85 : 1)
+      0.22,
+      (0.92 - (stage - 1) * 0.012) * (isConvergenceStage ? 0.82 : 1)
     ),
     bossHp:
       stage >= TOTAL_STAGES
         ? 25000
-        : Math.round((320 + (stage - 1) * 145) * (isConvergenceStage ? 1.45 : 1)),
+        : Math.round((480 + (stage - 1) * 165) * (isConvergenceStage ? 1.45 : 1)),
     isFiveLevelMilestone,
     unlockedEnemyLabel: enemyUnlock?.name,
     unlockedEnemyId: enemyUnlock?.id,
@@ -1014,6 +1014,8 @@ export function computeEnemyEssenceReward(
   else if (kind === 'stalker') base = 10;
   else if (kind === 'pyro') base = 11;
   else if (kind === 'titan') base = 14;
+  else if (kind === 'shield_bearer') base = 12;
+  else if (kind === 'corruptor') base = 13;
   else if (kind === 'reaper') base = 16;
   else if (kind === 'boss') base = 24 + Math.max(1, stage) * 2;
   return overchargeActive ? Math.round(base * 1.5) : base;
@@ -1169,17 +1171,16 @@ export function getHeroStatsForLevel(
 } {
   const spec = HERO_SPECS[heroClass];
   const delta = Math.max(0, Math.min(MAX_HERO_LEVEL, level) - 1);
-  const earlyDelta = Math.min(14, delta);
-  const lateDelta = Math.max(0, delta - 14);
-  const damageMult = Math.pow(1.24, earlyDelta) * Math.pow(1.13, lateDelta);
+  // Modest linear damage scaling so fast Hero level-ups feel rewarding without soloing waves
+  const damageMult = 1 + delta * 0.085;
 
   return {
     damage: Math.round(spec.damage * damageMult),
-    cooldown: Math.max(0.15, Number((spec.cooldown * Math.pow(0.935, earlyDelta) * Math.pow(0.97, lateDelta)).toFixed(3))),
-    range: Math.round(spec.range * (1 + Math.min(0.9, delta * 0.036))),
-    critChance: Math.min(0.75, Number((spec.critChance + delta * 0.024).toFixed(3))),
+    cooldown: Math.max(0.24, Number((spec.cooldown * Math.pow(0.985, delta)).toFixed(3))),
+    range: Math.round(spec.range * (1 + Math.min(0.28, delta * 0.012))),
+    critChance: Math.min(0.36, Number((spec.critChance + delta * 0.008).toFixed(3))),
     blastRadius:
-      spec.blastRadius > 0 ? Math.round(spec.blastRadius * (1 + Math.min(1.1, delta * 0.045))) : 0,
+      spec.blastRadius > 0 ? Math.round(spec.blastRadius * (1 + Math.min(0.35, delta * 0.015))) : 0,
   };
 }
 
@@ -1536,10 +1537,11 @@ export function getEnemyResistanceMultiplier(
     enemy.kind === 'brute' ||
     enemy.kind === 'titan' ||
     enemy.kind === 'reaper' ||
+    enemy.kind === 'shield_bearer' ||
     enemy.kind === 'boss';
 
   if (byHero && isToughTarget) {
-    baseMult *= 0.85;
+    baseMult *= 0.65;
   }
 
   return baseMult;
@@ -1630,12 +1632,12 @@ export function applyMergeUpgrade(target: UnitEntity): UnitEntity {
   const levelDelta = nextLevel - 1;
 
   target.level = nextLevel;
-  target.damage = Math.round(spec.damage * Math.pow(1.75, levelDelta));
-  target.maxHp = Math.round(spec.maxHp * Math.pow(1.65, levelDelta));
+  target.damage = Math.round(spec.damage * Math.pow(1.95, levelDelta));
+  target.maxHp = Math.round(spec.maxHp * Math.pow(1.75, levelDelta));
   target.hp = target.maxHp;
-  target.cooldown = Math.max(0.28, Number((spec.cooldown * Math.pow(0.86, levelDelta)).toFixed(3)));
-  target.range = Math.round(spec.range * (1 + levelDelta * 0.08));
-  target.critChance = Math.min(0.6, spec.critChance + levelDelta * 0.04);
+  target.cooldown = Math.max(0.24, Number((spec.cooldown * Math.pow(0.84, levelDelta)).toFixed(3)));
+  target.range = Math.round(spec.range * (1 + levelDelta * 0.1));
+  target.critChance = Math.min(0.65, spec.critChance + levelDelta * 0.05);
   target.attackAnim = 1;
   return target;
 }
@@ -1666,10 +1668,10 @@ export function computeWaveConfig(
 } {
   const stageCfg = getStageConfig(stage, convergenceStages);
   const clampedWave = Math.max(1, wave);
-  const totalEnemies = stageCfg.baseEnemiesPerWave + (clampedWave - 1) * 4;
-  const spawnInterval = Math.max(0.24, stageCfg.spawnInterval - (clampedWave - 1) * 0.065);
-  const hpMultiplier = stageCfg.hpMultiplier * (1 + (clampedWave - 1) * 0.18);
-  const speedMultiplier = Math.min(1.78, stageCfg.speedMultiplier + (clampedWave - 1) * 0.035);
+  const totalEnemies = stageCfg.baseEnemiesPerWave + (clampedWave - 1) * 5;
+  const spawnInterval = Math.max(0.2, stageCfg.spawnInterval - (clampedWave - 1) * 0.07);
+  const hpMultiplier = stageCfg.hpMultiplier * (1 + (clampedWave - 1) * 0.24);
+  const speedMultiplier = Math.min(1.82, stageCfg.speedMultiplier + (clampedWave - 1) * 0.04);
 
   const stalkerWeight =
     stage >= 8
@@ -1695,18 +1697,28 @@ export function computeWaveConfig(
       : stage >= 10
         ? Math.min(0.1, 0.06 + (clampedWave - 1) * 0.01)
         : 0;
+  const shieldBearerWeight = stage >= 4 ? Math.min(0.12, 0.05 + (clampedWave - 1) * 0.015) : 0;
+  const corruptorWeight = stage >= 7 ? Math.min(0.1, 0.04 + (clampedWave - 1) * 0.015) : 0;
 
   const bruteWeight =
     stage === 1 && clampedWave === 1
-      ? 0.06
-      : Math.min(0.26, 0.09 + (stage - 1) * 0.01 + (clampedWave - 1) * 0.03);
+      ? 0.08
+      : Math.min(0.26, 0.12 + (stage - 1) * 0.01 + (clampedWave - 1) * 0.03);
   const shieldedWeight =
     stage === 1 && clampedWave === 1
-      ? 0.2
-      : Math.min(0.3, 0.2 + (stage - 1) * 0.008 + (clampedWave - 1) * 0.02);
+      ? 0.24
+      : Math.min(0.32, 0.24 + (stage - 1) * 0.008 + (clampedWave - 1) * 0.025);
   const walkerWeight = Math.max(
-    0.14,
-    1 - bruteWeight - shieldedWeight - stalkerWeight - pyroWeight - titanWeight - reaperWeight
+    0.12,
+    1 -
+      bruteWeight -
+      shieldedWeight -
+      stalkerWeight -
+      pyroWeight -
+      titanWeight -
+      reaperWeight -
+      shieldBearerWeight -
+      corruptorWeight
   );
 
   return {
@@ -1724,8 +1736,8 @@ export function computeWaveConfig(
       pyro: pyroWeight,
       titan: titanWeight,
       reaper: reaperWeight,
-      shield_bearer: 0,
-      corruptor: 0,
+      shield_bearer: shieldBearerWeight,
+      corruptor: corruptorWeight,
     },
   };
 }

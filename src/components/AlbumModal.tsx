@@ -1,5 +1,5 @@
 import React, { useEffect, useMemo, useState } from 'react';
-import { BookOpen, Lock, Search, Shield, Skull, Sparkles, X } from 'lucide-react';
+import { BookOpen, CheckCircle2, Crosshair, Lock, Search, Shield, Skull, Sparkles, Trophy, X } from 'lucide-react';
 import { soundEngine } from '../game/audio';
 import {
   ALLY_ALBUM,
@@ -7,16 +7,26 @@ import {
   isAllyUnlocked,
   isEnemyUnlocked,
 } from '../game/bestiaryData';
-import { AllyCatalogEntry, EnemyCatalogEntry, UNIT_SPECS } from '../game/types';
+import {
+  ACHIEVEMENT_CATALOG,
+  AllyCatalogEntry,
+  EnemyCatalogEntry,
+  UNIT_SPECS,
+} from '../game/types';
 import { AllyPortraitSvg, EnemyPortraitSvg } from './AlbumArtwork';
 
-export type AlbumTab = 'enemies' | 'allies';
+export type AlbumTab = 'enemies' | 'allies' | 'achievements';
 type FilterMode = 'all' | 'unlocked' | 'locked' | 'bosses';
 
 interface AlbumModalProps {
   isOpen: boolean;
   initialTab: AlbumTab;
   highestUnlockedStage: number;
+  enemyKillsByCatalogId?: Record<number, number>;
+  discoveredEnemyIds?: number[];
+  unlockedAchievements?: string[];
+  achievementProgress?: Record<string, number>;
+  emberSouls?: number;
   onClose: () => void;
 }
 
@@ -24,6 +34,11 @@ export const AlbumModal: React.FC<AlbumModalProps> = ({
   isOpen,
   initialTab,
   highestUnlockedStage,
+  enemyKillsByCatalogId = {},
+  discoveredEnemyIds = [],
+  unlockedAchievements = [],
+  achievementProgress = {},
+  emberSouls = 0,
   onClose,
 }) => {
   const [activeTab, setActiveTab] = useState<AlbumTab>(initialTab);
@@ -58,9 +73,14 @@ export const AlbumModal: React.FC<AlbumModalProps> = ({
     return () => window.removeEventListener('keydown', onKey);
   }, [isOpen, selectedEnemy, selectedAlly, onClose]);
 
+  const discoveredSet = useMemo(() => new Set(discoveredEnemyIds), [discoveredEnemyIds]);
+
   const unlockedEnemyCount = useMemo(
-    () => ENEMY_ALBUM.filter((e) => isEnemyUnlocked(e, highestUnlockedStage)).length,
-    [highestUnlockedStage]
+    () =>
+      ENEMY_ALBUM.filter(
+        (e) => isEnemyUnlocked(e, highestUnlockedStage) || discoveredSet.has(e.id)
+      ).length,
+    [highestUnlockedStage, discoveredSet]
   );
 
   const unlockedAllyCount = useMemo(
@@ -71,18 +91,20 @@ export const AlbumModal: React.FC<AlbumModalProps> = ({
   const filteredEnemies = useMemo(() => {
     const q = searchQuery.trim().toLowerCase();
     return ENEMY_ALBUM.filter((enemy) => {
-      const unlocked = isEnemyUnlocked(enemy, highestUnlockedStage);
+      const unlocked = isEnemyUnlocked(enemy, highestUnlockedStage) || discoveredSet.has(enemy.id);
       if (filterMode === 'unlocked' && !unlocked) return false;
       if (filterMode === 'locked' && unlocked) return false;
       if (filterMode === 'bosses' && !enemy.isBoss) return false;
       if (!q) return true;
       return (
         enemy.code.toLowerCase().includes(q) ||
-        (unlocked && enemy.name.toLowerCase().includes(q)) ||
+        (unlocked &&
+          (enemy.name.toLowerCase().includes(q) ||
+            enemy.specialty.toLowerCase().includes(q))) ||
         (!unlocked && `fase ${enemy.unlockStage}`.includes(q))
       );
     });
-  }, [filterMode, highestUnlockedStage, searchQuery]);
+  }, [filterMode, highestUnlockedStage, discoveredSet, searchQuery]);
 
   const filteredAllies = useMemo(() => {
     const q = searchQuery.trim().toLowerCase();
@@ -102,10 +124,34 @@ export const AlbumModal: React.FC<AlbumModalProps> = ({
     });
   }, [filterMode, highestUnlockedStage, searchQuery]);
 
+  const filteredAchievements = useMemo(() => {
+    const q = searchQuery.trim().toLowerCase();
+    return ACHIEVEMENT_CATALOG.filter((ach) => {
+      const done = unlockedAchievements.includes(ach.id);
+      if (filterMode === 'unlocked' && !done) return false;
+      if (filterMode === 'locked' && done) return false;
+      if (!q) return true;
+      return (
+        ach.title.toLowerCase().includes(q) ||
+        ach.description.toLowerCase().includes(q)
+      );
+    });
+  }, [filterMode, unlockedAchievements, searchQuery]);
+
   if (!isOpen) return null;
 
-  const currentCount = activeTab === 'enemies' ? unlockedEnemyCount : unlockedAllyCount;
-  const currentTotal = activeTab === 'enemies' ? ENEMY_ALBUM.length : ALLY_ALBUM.length;
+  const currentCount =
+    activeTab === 'enemies'
+      ? unlockedEnemyCount
+      : activeTab === 'allies'
+        ? unlockedAllyCount
+        : unlockedAchievements.length;
+  const currentTotal =
+    activeTab === 'enemies'
+      ? ENEMY_ALBUM.length
+      : activeTab === 'allies'
+        ? ALLY_ALBUM.length
+        : ACHIEVEMENT_CATALOG.length;
   const completionPct = Math.round((currentCount / Math.max(1, currentTotal)) * 100);
 
   return (
@@ -128,17 +174,20 @@ export const AlbumModal: React.FC<AlbumModalProps> = ({
                 id="album-modal-title"
                 className="font-display text-lg font-bold text-white sm:text-xl"
               >
+                Códice de Brasa ·{' '}
                 {activeTab === 'enemies'
-                  ? 'Álbum de Inimigos'
-                  : 'Álbum de Aliados'}
+                  ? 'Bestiário'
+                  : activeTab === 'allies'
+                    ? 'Aliados'
+                    : 'Conquistas'}
               </h2>
               <p className="font-mono-tabular text-xs font-semibold text-[#94A3B8]">
-                Fase liberada: {highestUnlockedStage}/150 · Progresso: {currentCount}/{currentTotal} ({completionPct}%)
+                Fase: {highestUnlockedStage}/150 · Progresso: {currentCount}/{currentTotal} ({completionPct}%) · Almas: {emberSouls}
               </p>
             </div>
           </div>
 
-          <div className="flex items-center gap-2">
+          <div className="flex flex-wrap items-center gap-2">
             <button
               type="button"
               data-testid="album-tab-enemies"
@@ -179,8 +228,27 @@ export const AlbumModal: React.FC<AlbumModalProps> = ({
             </button>
             <button
               type="button"
+              data-testid="album-tab-achievements"
+              onClick={() => {
+                soundEngine.playClick();
+                setActiveTab('achievements');
+                if (filterMode === 'bosses') setFilterMode('all');
+                setSelectedEnemy(null);
+                setSelectedAlly(null);
+              }}
+              className={`flex items-center gap-1.5 rounded-xl border-2 px-3 py-1.5 text-xs font-bold whitespace-nowrap transition-colors sm:text-sm ${
+                activeTab === 'achievements'
+                  ? 'border-[#FACC15] bg-[#422006] text-[#FEF08A]'
+                  : 'border-[#334155] bg-[#1E293B] text-[#CBD5E1] hover:border-[#FACC15]/70'
+              }`}
+            >
+              <Trophy className="h-4 w-4" />
+              <span>Conquistas ({unlockedAchievements.length}/{ACHIEVEMENT_CATALOG.length})</span>
+            </button>
+            <button
+              type="button"
               data-testid="album-close"
-              aria-label="Fechar álbum"
+              aria-label="Fechar códice"
               onClick={() => {
                 soundEngine.playClick();
                 onClose();
@@ -199,7 +267,9 @@ export const AlbumModal: React.FC<AlbumModalProps> = ({
               className={`h-full rounded-full transition-all duration-300 ${
                 activeTab === 'enemies'
                   ? 'bg-gradient-to-r from-[#FF2E4C] to-[#FACC15]'
-                  : 'bg-gradient-to-r from-[#00D4FF] to-[#10B981]'
+                  : activeTab === 'allies'
+                    ? 'bg-gradient-to-r from-[#00D4FF] to-[#10B981]'
+                    : 'bg-gradient-to-r from-[#FACC15] to-[#10B981]'
               }`}
               style={{ width: `${completionPct}%` }}
             />
@@ -210,8 +280,14 @@ export const AlbumModal: React.FC<AlbumModalProps> = ({
               {(
                 [
                   { id: 'all', label: 'Todos' },
-                  { id: 'unlocked', label: 'Desbloqueados' },
-                  { id: 'locked', label: 'Bloqueados' },
+                  {
+                    id: 'unlocked',
+                    label: activeTab === 'achievements' ? 'Concluídas' : 'Desbloqueados',
+                  },
+                  {
+                    id: 'locked',
+                    label: activeTab === 'achievements' ? 'Em progresso' : 'Bloqueados',
+                  },
                   ...(activeTab === 'enemies' ? [{ id: 'bosses', label: 'Chefes' }] : []),
                 ] as Array<{ id: FilterMode; label: string }>
               ).map((f) => (
@@ -242,7 +318,9 @@ export const AlbumModal: React.FC<AlbumModalProps> = ({
                 placeholder={
                   activeTab === 'enemies'
                     ? 'Buscar #001 ou inimigo...'
-                    : 'Buscar #001 ou aliado...'
+                    : activeTab === 'allies'
+                      ? 'Buscar #001 ou aliado...'
+                      : 'Buscar conquista...'
                 }
                 className="w-full rounded-xl border border-[#334155] bg-[#080D1A] py-1.5 pl-8 pr-3 text-xs font-medium text-white placeholder-[#64748B] focus:border-[#00D4FF] focus:outline-none"
               />
@@ -260,7 +338,9 @@ export const AlbumModal: React.FC<AlbumModalProps> = ({
             ) : (
               <div className="grid grid-cols-1 gap-3 sm:grid-cols-2 lg:grid-cols-3">
                 {filteredEnemies.map((enemy) => {
-                  const unlocked = isEnemyUnlocked(enemy, highestUnlockedStage);
+                  const unlocked = isEnemyUnlocked(enemy, highestUnlockedStage) || discoveredSet.has(enemy.id);
+                  const kills = enemyKillsByCatalogId[enemy.id] ?? 0;
+                  const counterAlly = ALLY_ALBUM.find((a) => a.id === enemy.counterAllyId);
                   return (
                     <button
                       key={enemy.id}
@@ -325,11 +405,23 @@ export const AlbumModal: React.FC<AlbumModalProps> = ({
                                 HP: ??? · Atributos ocultos
                               </span>
                             </div>
-                          ) : enemy.isBoss ? (
-                            <div className="mt-1 text-[11px] font-semibold text-[#FACC15]">
-                              Chefe de Marco
+                          ) : (
+                            <div className="mt-1 flex flex-wrap items-center gap-1.5 text-[11px] font-semibold">
+                              {enemy.isBoss && (
+                                <span className="rounded bg-[#422006] px-1.5 py-0.5 text-[10px] text-[#FACC15]">
+                                  Chefe
+                                </span>
+                              )}
+                              <span className="font-mono-tabular text-[#00D4FF]">
+                                Abates: {kills.toLocaleString('pt-BR')}
+                              </span>
+                              {counterAlly && (
+                                <span className="truncate text-[#10B981]">
+                                  · Fraqueza: {counterAlly.name}
+                                </span>
+                              )}
                             </div>
-                          ) : null}
+                          )}
                         </div>
                       </div>
 
@@ -341,6 +433,90 @@ export const AlbumModal: React.FC<AlbumModalProps> = ({
                         {unlocked ? enemy.story : enemy.mysteryPreview}
                       </p>
                     </button>
+                  );
+                })}
+              </div>
+            )
+          ) : activeTab === 'achievements' ? (
+            filteredAchievements.length === 0 ? (
+              <div className="py-12 text-center text-sm font-semibold text-[#94A3B8]">
+                Nenhuma conquista encontrada para este filtro.
+              </div>
+            ) : (
+              <div className="grid grid-cols-1 gap-3 sm:grid-cols-2">
+                {filteredAchievements.map((ach) => {
+                  const done = unlockedAchievements.includes(ach.id);
+                  const prog = Math.min(ach.target, achievementProgress[ach.id] ?? (done ? ach.target : 0));
+                  const pct = Math.round((prog / Math.max(1, ach.target)) * 100);
+                  const categoryLabel =
+                    ach.category === 'combat'
+                      ? 'Combate'
+                      : ach.category === 'mastery'
+                        ? 'Maestria'
+                        : 'Progressão';
+
+                  return (
+                    <div
+                      key={ach.id}
+                      data-testid={`achievement-card-${ach.id}`}
+                      data-unlocked={done ? 'true' : 'false'}
+                      className={`flex flex-col justify-between gap-3 rounded-2xl border-2 p-4 ${
+                        done
+                          ? 'border-[#FACC15] bg-[#1E293B]/95 shadow-[0_4px_16px_rgba(250,204,21,0.18)]'
+                          : 'border-[#334155] bg-[#111B30]'
+                      }`}
+                    >
+                      <div className="flex items-start justify-between gap-3">
+                        <div className="flex items-start gap-3">
+                          <div
+                            className={`flex h-11 w-11 shrink-0 items-center justify-center rounded-xl border ${
+                              done
+                                ? 'border-[#FACC15] bg-[#422006] text-[#FACC15]'
+                                : 'border-[#334155] bg-[#080D1A] text-[#64748B]'
+                            }`}
+                          >
+                            {done ? <CheckCircle2 className="h-6 w-6" /> : <Trophy className="h-5 w-5" />}
+                          </div>
+                          <div>
+                            <div className="flex flex-wrap items-center gap-1.5">
+                              <span className="rounded bg-[#080D1A] px-1.5 py-0.5 text-[10px] font-bold uppercase tracking-wider text-[#00D4FF]">
+                                {categoryLabel}
+                              </span>
+                              <span className="font-mono-tabular text-[11px] font-bold text-[#FACC15]">
+                                +{ach.rewardSouls} Almas de Brasa
+                              </span>
+                            </div>
+                            <h3 className="mt-1 font-display text-base font-bold text-white">
+                              {ach.title}
+                            </h3>
+                            <p className="mt-0.5 text-xs leading-relaxed text-[#CBD5E1]">
+                              {ach.description}
+                            </p>
+                          </div>
+                        </div>
+                      </div>
+
+                      <div>
+                        <div className="mb-1 flex items-center justify-between text-[11px] font-bold">
+                          <span className={done ? 'text-[#4ADE80]' : 'text-[#94A3B8]'}>
+                            {done ? 'Concluída' : 'Em andamento'}
+                          </span>
+                          <span className="font-mono-tabular text-white">
+                            {prog}/{ach.target} ({pct}%)
+                          </span>
+                        </div>
+                        <div className="h-2 w-full overflow-hidden rounded-full bg-[#060A14]">
+                          <div
+                            className={`h-full rounded-full transition-all duration-300 ${
+                              done
+                                ? 'bg-gradient-to-r from-[#22C55E] to-[#FACC15]'
+                                : 'bg-gradient-to-r from-[#00D4FF] to-[#38BDF8]'
+                            }`}
+                            style={{ width: `${pct}%` }}
+                          />
+                        </div>
+                      </div>
+                    </div>
                   );
                 })}
               </div>
@@ -461,7 +637,11 @@ export const AlbumModal: React.FC<AlbumModalProps> = ({
               onClick={(e) => e.stopPropagation()}
             >
               {(() => {
-                const unlocked = isEnemyUnlocked(selectedEnemy, highestUnlockedStage);
+                const unlocked =
+                  isEnemyUnlocked(selectedEnemy, highestUnlockedStage) ||
+                  discoveredSet.has(selectedEnemy.id);
+                const kills = enemyKillsByCatalogId[selectedEnemy.id] ?? 0;
+                const counterAlly = ALLY_ALBUM.find((a) => a.id === selectedEnemy.counterAllyId);
                 return (
                   <>
                     <div className="flex items-start justify-between gap-3">
@@ -503,6 +683,34 @@ export const AlbumModal: React.FC<AlbumModalProps> = ({
 
                     {unlocked ? (
                       <div className="mt-4 space-y-3 border-t border-[#1E293B] pt-3.5 text-sm">
+                        <div className="grid grid-cols-2 gap-2 rounded-xl border border-[#1E293B] bg-[#080D1A] p-2.5">
+                          <div>
+                            <div className="text-[10px] font-bold uppercase text-[#00D4FF]">Abates Registrados</div>
+                            <div className="font-mono-tabular text-base font-bold text-white">
+                              {kills.toLocaleString('pt-BR')}
+                            </div>
+                          </div>
+                          <div>
+                            <div className="text-[10px] font-bold uppercase text-[#10B981]">Fraqueza Tática</div>
+                            <div className="flex items-center gap-1 text-xs font-bold text-[#6EE7B7]">
+                              <Crosshair className="h-3.5 w-3.5 shrink-0" />
+                              <span className="truncate">{counterAlly?.name ?? 'Ataque Misto'}</span>
+                            </div>
+                          </div>
+                        </div>
+                        <div>
+                          <div className="text-xs font-bold uppercase tracking-wider text-[#00D4FF]">
+                            Comportamento & Traço
+                          </div>
+                          <p className="mt-1 text-xs font-semibold text-[#CBD5E1]">
+                            {selectedEnemy.specialty}
+                          </p>
+                          {counterAlly && (
+                            <p className="mt-1 text-xs text-[#6EE7B7]">
+                              Contra-ataque ideal: {counterAlly.name} ({counterAlly.specialty})
+                            </p>
+                          )}
+                        </div>
                         <div>
                           <div className="text-xs font-bold uppercase tracking-wider text-[#FACC15]">
                             História

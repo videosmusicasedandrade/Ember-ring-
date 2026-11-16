@@ -5,6 +5,7 @@ import {
   ChevronRight,
   Home,
   Lock,
+  Palette,
   Play,
   RotateCcw,
   Shield,
@@ -31,11 +32,16 @@ import {
   getStageConfig,
 } from '../game/engineMath';
 import {
+  ACHIEVEMENT_CATALOG,
+  FX_STYLES,
+  FxStyleId,
   HERO_SPECS,
   HeroClass,
   HeroUpgradeId,
   HudSnapshot,
   MAX_HERO_LEVEL,
+  RING_SKINS,
+  RingSkinId,
   TOTAL_STAGES,
 } from '../game/types';
 import { TALENT_SPECS } from '../game/simulation';
@@ -50,6 +56,8 @@ interface GameModalsProps {
   onSelectUpgrade: (upgradeId: HeroUpgradeId) => void;
   onUpgradeTalent: (talentId: string) => void;
   onSelectPact: (pactId: string) => void;
+  onBuyOrEquipRingSkin: (skinId: RingSkinId) => void;
+  onBuyOrEquipFxStyle: (fxId: FxStyleId) => void;
   onStart: (stage?: number) => void;
   onNextStage: () => void;
   onResume: () => void;
@@ -101,6 +109,8 @@ export const GameModals: React.FC<GameModalsProps> = ({
   onSelectUpgrade,
   onUpgradeTalent,
   onSelectPact,
+  onBuyOrEquipRingSkin,
+  onBuyOrEquipFxStyle,
   onStart,
   onNextStage,
   onResume,
@@ -112,6 +122,7 @@ export const GameModals: React.FC<GameModalsProps> = ({
     Math.floor((Math.max(1, selectedStage) - 1) / STAGES_PER_CHAPTER)
   );
   const [showTalentsModal, setShowTalentsModal] = useState(false);
+  const [showShopModal, setShowShopModal] = useState(false);
 
   useEffect(() => {
     setChapterIndex(Math.floor((Math.max(1, selectedStage) - 1) / STAGES_PER_CHAPTER));
@@ -400,10 +411,10 @@ export const GameModals: React.FC<GameModalsProps> = ({
             </div>
           </section>
 
-          {/* 2. Two Main Menu Album Systems + Talents Tree */}
+          {/* 2. Códice de Brasa, Talentos & Loja de Aparências */}
           <section
-            aria-label="Álbuns e Talentos"
-            className="grid w-full grid-cols-1 gap-2 sm:grid-cols-3 sm:gap-2.5"
+            aria-label="Códice, Talentos e Aparências"
+            className="grid w-full grid-cols-1 gap-2 sm:grid-cols-2 sm:gap-2.5"
           >
             <button
               type="button"
@@ -420,10 +431,10 @@ export const GameModals: React.FC<GameModalsProps> = ({
                 </div>
                 <div className="min-w-0">
                   <div className="font-display text-sm font-bold text-white sm:text-base">
-                    Álbum de Inimigos
+                    Códice · Inimigos
                   </div>
                   <div className="font-mono-tabular text-[11px] font-semibold text-[#CBD5E1]">
-                    {unlockedEnemies}/50 revelados
+                    {unlockedEnemies}/50 revelados · {hud.totalLifetimeKills} abates
                   </div>
                 </div>
               </div>
@@ -447,7 +458,7 @@ export const GameModals: React.FC<GameModalsProps> = ({
                 </div>
                 <div className="min-w-0">
                   <div className="font-display text-sm font-bold text-white sm:text-base">
-                    Álbum de Aliados
+                    Códice · Aliados
                   </div>
                   <div className="font-mono-tabular text-[11px] font-semibold text-[#CBD5E1]">
                     {unlockedAllies}/10 recrutáveis
@@ -477,12 +488,62 @@ export const GameModals: React.FC<GameModalsProps> = ({
                     Talentos de Brasa
                   </div>
                   <div className="font-mono-tabular text-[11px] font-semibold text-[#FACC15]">
-                    {hud.emberSouls} Almas
+                    {hud.emberSouls} Almas de Brasa
                   </div>
                 </div>
               </div>
               <span className="font-mono-tabular shrink-0 text-xs font-bold whitespace-nowrap text-[#FACC15]">
                 Árvore →
+              </span>
+            </button>
+
+            <button
+              type="button"
+              data-testid="open-shop-modal"
+              onClick={() => {
+                soundEngine.playClick();
+                setShowShopModal(true);
+              }}
+              className="flex items-center justify-between gap-3 rounded-2xl border-2 border-[#047857] bg-[#0F172A]/95 px-4 py-2.5 text-left shadow-[0_5px_0_rgba(2,6,23,0.85)] transition-transform hover:-translate-y-0.5 hover:border-[#10B981]"
+            >
+              <div className="flex items-center gap-3 min-w-0">
+                <div className="flex h-10 w-10 shrink-0 items-center justify-center rounded-xl border border-[#10B981]/50 bg-[#064E3B] text-[#6EE7B7]">
+                  <Palette className="h-5 w-5" />
+                </div>
+                <div className="min-w-0">
+                  <div className="font-display text-sm font-bold text-white sm:text-base">
+                    Loja de Aparências
+                  </div>
+                  <div className="font-mono-tabular text-[11px] font-semibold text-[#6EE7B7]">
+                    {RING_SKINS[hud.equippedRingSkin].name.replace('Anel ', '')}
+                  </div>
+                </div>
+              </div>
+              <span className="font-mono-tabular shrink-0 text-xs font-bold whitespace-nowrap text-[#6EE7B7]">
+                Skins →
+              </span>
+            </button>
+
+            <button
+              type="button"
+              data-testid="open-achievements-album"
+              onClick={() => {
+                soundEngine.playClick();
+                onOpenAlbum('achievements');
+              }}
+              className="sm:col-span-2 flex items-center justify-between gap-3 rounded-2xl border-2 border-[#475569] bg-[#0F172A]/95 px-4 py-2 text-left shadow-[0_4px_0_rgba(2,6,23,0.85)] transition-transform hover:-translate-y-0.5 hover:border-[#FACC15]"
+            >
+              <div className="flex items-center gap-2.5 min-w-0">
+                <Trophy className="h-4.5 w-4.5 shrink-0 text-[#FACC15]" />
+                <span className="font-display text-sm font-bold text-white">
+                  Conquistas da Fortaleza
+                </span>
+                <span className="font-mono-tabular text-xs font-semibold text-[#94A3B8]">
+                  ({hud.unlockedAchievements.length}/{ACHIEVEMENT_CATALOG.length} concluídas)
+                </span>
+              </div>
+              <span className="font-mono-tabular shrink-0 text-xs font-bold whitespace-nowrap text-[#FACC15]">
+                Resgatar Almas →
               </span>
             </button>
           </section>
@@ -544,6 +605,192 @@ export const GameModals: React.FC<GameModalsProps> = ({
                       </div>
                     );
                   })}
+                </div>
+              </div>
+            </div>
+          )}
+
+          {/* Loja de Aparências (Single-Player Cosmetics Shop) */}
+          {showShopModal && (
+            <div
+              data-testid="shop-modal"
+              role="dialog"
+              aria-modal="true"
+              aria-label="Loja de Aparências"
+              className="fixed inset-0 z-50 flex items-center justify-center bg-black/82 p-4"
+            >
+              <div className="flex max-h-[90vh] w-full max-w-2xl flex-col overflow-hidden rounded-3xl border-2 border-[#10B981] bg-[#0F172A] text-left shadow-[0_14px_40px_rgba(0,0,0,0.92)]">
+                <div className="flex items-center justify-between border-b border-white/10 bg-[#080D1A] px-5 py-4">
+                  <div className="flex items-center gap-3">
+                    <div className="flex h-10 w-10 items-center justify-center rounded-xl border border-[#10B981]/50 bg-[#064E3B] text-[#6EE7B7]">
+                      <Palette className="h-5 w-5" />
+                    </div>
+                    <div>
+                      <h3 className="font-display text-lg font-bold text-[#6EE7B7]">
+                        Loja de Aparências
+                      </h3>
+                      <div className="font-mono-tabular text-xs font-bold text-[#FACC15]">
+                        Almas de Brasa disponíveis: {hud.emberSouls}
+                      </div>
+                    </div>
+                  </div>
+                  <button
+                    type="button"
+                    data-testid="shop-close"
+                    onClick={() => {
+                      soundEngine.playClick();
+                      setShowShopModal(false);
+                    }}
+                    className="rounded-xl border border-[#334155] bg-[#1E293B] px-3 py-1.5 text-xs font-bold text-white hover:bg-[#334155]"
+                  >
+                    Fechar
+                  </button>
+                </div>
+
+                <div className="flex-1 space-y-5 overflow-y-auto p-5">
+                  {/* Section 1: Ring Skins */}
+                  <div>
+                    <h4 className="mb-2.5 text-xs font-bold uppercase tracking-wider text-[#FACC15]">
+                      Skins do Anel Central
+                    </h4>
+                    <div className="grid grid-cols-1 gap-2.5 sm:grid-cols-2">
+                      {Object.values(RING_SKINS).map((skin) => {
+                        const unlocked = hud.unlockedCosmetics.includes(`ring:${skin.id}`);
+                        const equipped = hud.equippedRingSkin === skin.id;
+                        const canAfford = hud.emberSouls >= skin.cost;
+
+                        return (
+                          <div
+                            key={skin.id}
+                            className={`flex flex-col justify-between gap-3 rounded-2xl border-2 p-3 ${
+                              equipped
+                                ? 'border-[#FACC15] bg-[#1E293B]'
+                                : 'border-[#334155] bg-[#080D1A]'
+                            }`}
+                          >
+                            <div className="flex items-start gap-3">
+                              <div
+                                className="flex h-11 w-11 shrink-0 items-center justify-center rounded-full border-4 bg-[#020617]"
+                                style={{
+                                  borderColor: skin.primaryColor,
+                                  boxShadow: `0 0 14px ${skin.glowColor}`,
+                                }}
+                              >
+                                <div
+                                  className="h-4 w-4 rounded-full border-2"
+                                  style={{
+                                    borderColor: skin.secondaryColor,
+                                    backgroundColor: skin.runeColor,
+                                  }}
+                                />
+                              </div>
+                              <div className="min-w-0">
+                                <div className="font-display text-sm font-bold text-white">
+                                  {skin.name}
+                                </div>
+                                <p className="mt-0.5 text-[11px] leading-snug text-[#94A3B8]">
+                                  {skin.description}
+                                </p>
+                              </div>
+                            </div>
+                            <button
+                              type="button"
+                              data-testid={`shop-ring-${skin.id}`}
+                              disabled={equipped || (!unlocked && !canAfford)}
+                              onClick={() => onBuyOrEquipRingSkin(skin.id)}
+                              className={`font-mono-tabular w-full rounded-xl border px-3 py-1.5 text-xs font-bold transition-transform active:translate-y-0.5 ${
+                                equipped
+                                  ? 'border-[#FACC15] bg-[#422006] text-[#FACC15]'
+                                  : unlocked
+                                    ? 'border-[#00D4FF] bg-[#082F49] text-[#E0F2FE] hover:bg-[#0369A1]'
+                                    : canAfford
+                                      ? 'border-[#10B981] bg-[#064E3B] text-[#6EE7B7] hover:bg-[#047857]'
+                                      : 'cursor-not-allowed border-[#334155] bg-[#1E293B] text-[#64748B]'
+                              }`}
+                            >
+                              {equipped
+                                ? 'Equipado'
+                                : unlocked
+                                  ? 'Equipar'
+                                  : `Desbloquear (${skin.cost} Almas)`}
+                            </button>
+                          </div>
+                        );
+                      })}
+                    </div>
+                  </div>
+
+                  {/* Section 2: Shot & Spell FX Styles */}
+                  <div>
+                    <h4 className="mb-2.5 text-xs font-bold uppercase tracking-wider text-[#00D4FF]">
+                      Efeitos de Disparo & Magias
+                    </h4>
+                    <div className="grid grid-cols-1 gap-2.5 sm:grid-cols-2">
+                      {Object.values(FX_STYLES).map((fx) => {
+                        const unlocked = hud.unlockedCosmetics.includes(`fx:${fx.id}`);
+                        const equipped = hud.equippedFxStyle === fx.id;
+                        const canAfford = hud.emberSouls >= fx.cost;
+
+                        return (
+                          <div
+                            key={fx.id}
+                            className={`flex flex-col justify-between gap-3 rounded-2xl border-2 p-3 ${
+                              equipped
+                                ? 'border-[#00D4FF] bg-[#1E293B]'
+                                : 'border-[#334155] bg-[#080D1A]'
+                            }`}
+                          >
+                            <div className="flex items-start gap-3">
+                              <div
+                                className="flex h-11 w-11 shrink-0 items-center justify-center rounded-xl border-2 bg-[#020617]"
+                                style={{ borderColor: fx.projectileTint }}
+                              >
+                                <div className="flex items-center gap-1">
+                                  <span
+                                    className="h-3 w-3 rounded-full"
+                                    style={{ backgroundColor: fx.projectileTint }}
+                                  />
+                                  <span
+                                    className="h-2 w-2 rounded-full"
+                                    style={{ backgroundColor: fx.slashTint }}
+                                  />
+                                </div>
+                              </div>
+                              <div className="min-w-0">
+                                <div className="font-display text-sm font-bold text-white">
+                                  {fx.name}
+                                </div>
+                                <p className="mt-0.5 text-[11px] leading-snug text-[#94A3B8]">
+                                  {fx.description}
+                                </p>
+                              </div>
+                            </div>
+                            <button
+                              type="button"
+                              data-testid={`shop-fx-${fx.id}`}
+                              disabled={equipped || (!unlocked && !canAfford)}
+                              onClick={() => onBuyOrEquipFxStyle(fx.id)}
+                              className={`font-mono-tabular w-full rounded-xl border px-3 py-1.5 text-xs font-bold transition-transform active:translate-y-0.5 ${
+                                equipped
+                                  ? 'border-[#00D4FF] bg-[#082F49] text-[#00D4FF]'
+                                  : unlocked
+                                    ? 'border-[#00D4FF] bg-[#082F49]/70 text-[#E0F2FE] hover:bg-[#0369A1]'
+                                    : canAfford
+                                      ? 'border-[#10B981] bg-[#064E3B] text-[#6EE7B7] hover:bg-[#047857]'
+                                      : 'cursor-not-allowed border-[#334155] bg-[#1E293B] text-[#64748B]'
+                              }`}
+                            >
+                              {equipped
+                                ? 'Equipado'
+                                : unlocked
+                                  ? 'Equipar'
+                                  : `Desbloquear (${fx.cost} Almas)`}
+                            </button>
+                          </div>
+                        );
+                      })}
+                    </div>
+                  </div>
                 </div>
               </div>
             </div>

@@ -554,8 +554,12 @@ export const GameHUD: React.FC<GameHUDProps> = ({
           const spec = UNIT_SPECS[hoveredUnitKind];
           const ally = ALLY_ALBUM.find((a) => a.unitKind === hoveredUnitKind);
           if (!spec) return null;
+          const discountLvl = hud.talents?.towerDiscount ?? 0;
+          const talentMult = Math.max(0.75, 1 - discountLvl * 0.04);
+          const ironMult = hud.activePacts?.includes('iron') ? 1.15 : 1;
+          const effectiveCost = Math.max(10, Math.round(spec.cost * talentMult * ironMult));
           const attackSpeed = (1 / spec.cooldown).toFixed(1);
-          const effectiveDamage = hud.paladinAuraActive ? Math.round(spec.damage * 1.25) : spec.damage;
+          const effectiveDamage = hud.paladinAuraActive ? Math.round(spec.damage * 1.2) : spec.damage;
 
           return (
             <div
@@ -588,7 +592,7 @@ export const GameHUD: React.FC<GameHUDProps> = ({
                 </div>
                 <div className="flex shrink-0 flex-col items-end">
                   <span className="font-mono-tabular text-xs font-bold text-[#FACC15]">
-                    {spec.cost} essência
+                    {effectiveCost} essência
                   </span>
                   <span className="text-[10px] text-white/60">{spec.maxHp} HP Base</span>
                 </div>
@@ -651,6 +655,9 @@ export const GameHUD: React.FC<GameHUDProps> = ({
           const unlockedAllies = getUnlockedAlliesForStage(
             Math.max(hud.stage, hud.highestUnlockedStage)
           );
+          const discountLvl = hud.talents?.towerDiscount ?? 0;
+          const talentMult = Math.max(0.75, 1 - discountLvl * 0.04);
+          const ironMult = hud.activePacts?.includes('iron') ? 1.15 : 1;
           return (
             <div
               data-testid="ally-dock"
@@ -659,8 +666,9 @@ export const GameHUD: React.FC<GameHUDProps> = ({
               {unlockedAllies.map((ally) => {
                 const kind = ally.unitKind;
                 const spec = UNIT_SPECS[kind];
+                const effectiveCost = Math.max(10, Math.round(spec.cost * talentMult * ironMult));
                 const isSelected = hud.selectedUnit === kind;
-                const canAfford = hud.essence >= spec.cost;
+                const canAfford = hud.essence >= effectiveCost;
                 return (
                   <div
                     key={kind}
@@ -699,7 +707,7 @@ export const GameHUD: React.FC<GameHUDProps> = ({
                         </div>
                         <div className="flex items-center gap-1.5 whitespace-nowrap text-[11px] text-[#94A3B8]">
                           <span className="font-mono-tabular font-bold text-[#FACC15]">
-                            {spec.cost} ess.
+                            {effectiveCost} ess.
                           </span>
                           <span aria-hidden="true">·</span>
                           <span className="text-[10px] sm:text-[11px]" style={{ color: ally.colorHex }}>
@@ -711,7 +719,7 @@ export const GameHUD: React.FC<GameHUDProps> = ({
                     <button
                       type="button"
                       tabIndex={-1}
-                      aria-label={`Recrutar ${spec.name} em slot livre (${spec.cost} essência)`}
+                      aria-label={`Recrutar ${spec.name} em slot livre (${effectiveCost} essência)`}
                       disabled={!canAfford}
                       onClick={(e) => {
                         e.currentTarget.blur();

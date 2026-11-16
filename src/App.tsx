@@ -7,9 +7,11 @@ import { soundEngine } from './game/audio';
 import { getUnlockedAlliesForStage } from './game/bestiaryData';
 import { GameSimulation } from './game/simulation';
 import {
+  FxStyleId,
   HeroClass,
   HeroUpgradeId,
   HudSnapshot,
+  RingSkinId,
   SpellKind,
   TOTAL_STAGES,
   UnitKind,
@@ -266,6 +268,28 @@ export default function App() {
     [syncHud]
   );
 
+  const handleBuyOrEquipRingSkin = useCallback(
+    (skinId: RingSkinId) => {
+      const sim = simRef.current;
+      if (!sim) return;
+      if (sim.buyOrEquipRingSkin(skinId)) {
+        syncHud();
+      }
+    },
+    [syncHud]
+  );
+
+  const handleBuyOrEquipFxStyle = useCallback(
+    (fxId: FxStyleId) => {
+      const sim = simRef.current;
+      if (!sim) return;
+      if (sim.buyOrEquipFxStyle(fxId)) {
+        syncHud();
+      }
+    },
+    [syncHud]
+  );
+
   const handleActivateSpell = useCallback(
     (kind: SpellKind) => {
       const sim = simRef.current;
@@ -397,6 +421,8 @@ export default function App() {
         onSelectUpgrade={handleSelectUpgrade}
         onUpgradeTalent={handleUpgradeTalent}
         onSelectPact={handleSelectPact}
+        onBuyOrEquipRingSkin={handleBuyOrEquipRingSkin}
+        onBuyOrEquipFxStyle={handleBuyOrEquipFxStyle}
         onStart={handleStart}
         onNextStage={handleNextStage}
         onResume={handleResume}
@@ -408,6 +434,11 @@ export default function App() {
         isOpen={albumTab !== null}
         initialTab={albumTab ?? 'enemies'}
         highestUnlockedStage={hud.highestUnlockedStage}
+        enemyKillsByCatalogId={hud.enemyKillsByCatalogId}
+        discoveredEnemyIds={hud.discoveredEnemyIds}
+        unlockedAchievements={hud.unlockedAchievements}
+        achievementProgress={hud.achievementProgress}
+        emberSouls={hud.emberSouls}
         onClose={() => setAlbumTab(null)}
       />
     </main>

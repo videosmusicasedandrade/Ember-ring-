@@ -15,6 +15,8 @@ export interface SavedProgress {
   bestScore: number;
   selectedHeroClass: HeroClass;
   evolutionPoints: number;
+  emberSouls: number;
+  talents: Record<string, number>;
   heroes: Record<HeroClass, HeroSaveData>;
   convergenceStages: number[];
 }
@@ -105,6 +107,13 @@ export function createDefaultProgress(seed?: number): SavedProgress {
     bestScore: 0,
     selectedHeroClass: 'archer',
     evolutionPoints: 2,
+    emberSouls: 10,
+    talents: {
+      critMastery: 0,
+      manaRegen: 0,
+      ringReach: 0,
+      towerDiscount: 0,
+    },
     heroes: createDefaultHeroRoster(),
     convergenceStages: generateConvergenceStages(seed),
   };
@@ -130,6 +139,8 @@ export function loadProgress(): SavedProgress {
             ? (legacy.selectedHeroClass as HeroClass)
             : 'archer',
           evolutionPoints: 2,
+          emberSouls: 10,
+          talents: { critMastery: 0, manaRegen: 0, ringReach: 0, towerDiscount: 0 },
           heroes: createDefaultHeroRoster(),
           convergenceStages: generateConvergenceStages(),
         };
@@ -151,6 +162,13 @@ export function loadProgress(): SavedProgress {
       ? (parsed.selectedHeroClass as HeroClass)
       : 'archer';
     const evolutionPoints = Math.max(0, Math.floor(Number(parsed.evolutionPoints) ?? 0));
+    const emberSouls = Math.max(0, Math.floor(Number(parsed.emberSouls) ?? 10));
+    const talents = {
+      critMastery: Math.max(0, Math.min(5, Math.floor(Number(parsed.talents?.critMastery) || 0))),
+      manaRegen: Math.max(0, Math.min(5, Math.floor(Number(parsed.talents?.manaRegen) || 0))),
+      ringReach: Math.max(0, Math.min(5, Math.floor(Number(parsed.talents?.ringReach) || 0))),
+      towerDiscount: Math.max(0, Math.min(5, Math.floor(Number(parsed.talents?.towerDiscount) || 0))),
+    };
     const heroes: Record<HeroClass, HeroSaveData> = {
       archer: sanitizeHeroSave(parsed.heroes?.archer),
       swordsman: sanitizeHeroSave(parsed.heroes?.swordsman),
@@ -163,6 +181,8 @@ export function loadProgress(): SavedProgress {
       bestScore,
       selectedHeroClass,
       evolutionPoints,
+      emberSouls,
+      talents,
       heroes,
       convergenceStages,
     };
@@ -186,6 +206,13 @@ export function saveProgress(progress: SavedProgress): void {
           ? progress.selectedHeroClass
           : 'archer',
         evolutionPoints: Math.max(0, Math.floor(progress.evolutionPoints)),
+        emberSouls: Math.max(0, Math.floor(progress.emberSouls)),
+        talents: {
+          critMastery: Math.max(0, Math.min(5, Math.floor(progress.talents?.critMastery || 0))),
+          manaRegen: Math.max(0, Math.min(5, Math.floor(progress.talents?.manaRegen || 0))),
+          ringReach: Math.max(0, Math.min(5, Math.floor(progress.talents?.ringReach || 0))),
+          towerDiscount: Math.max(0, Math.min(5, Math.floor(progress.talents?.towerDiscount || 0))),
+        },
         heroes: {
           archer: sanitizeHeroSave(progress.heroes.archer),
           swordsman: sanitizeHeroSave(progress.heroes.swordsman),

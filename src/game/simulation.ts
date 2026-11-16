@@ -74,10 +74,25 @@ import {
   UNIT_SPECS,
   UnitEntity,
   UnitKind,
+  PactOption,
 } from './types';
 
 const PARTICLE_POOL_SIZE = 340;
 const HERO_ORDER: HeroClass[] = ['archer', 'swordsman', 'bomber'];
+
+export const TALENT_SPECS: Record<string, { name: string; description: string; maxLevel: number; baseCost: number }> = {
+  critMastery: { name: 'Maestria Crítica', description: 'Aumenta Dano Crítico inicial e Chance Crítica.', maxLevel: 5, baseCost: 5 },
+  manaRegen: { name: 'Regeneração Arcana', description: 'Reduz recarga de feitiços.', maxLevel: 5, baseCost: 5 },
+  ringReach: { name: 'Alcance do Anel', description: 'Amplia alcance das torres e do anel.', maxLevel: 5, baseCost: 5 },
+  towerDiscount: { name: 'Economia de Brasa', description: 'Reduz custo de tropas.', maxLevel: 5, baseCost: 5 },
+};
+
+export const PACT_POOL: PactOption[] = [
+  { id: 'blood', title: 'Pacto de Sangue', description: 'Torres dão +40% de dano, mas você perde 0.8 HP por segundo.', tone: 'crimson' },
+  { id: 'wind', title: 'Bênção dos Ventos', description: 'Velocidade de ataque +25%, mas alcance -10%.', tone: 'electric' },
+  { id: 'iron', title: 'Pacto de Ferro', description: 'Castelo ganha +50 HP máximo, mas custo de tropas +15%.', tone: 'gold' },
+  { id: 'void', title: 'Pacto do Vazio', description: 'Recarga de feitiços é 40% mais rápida, mas dano base das unidades -15%.', tone: 'crimson' },
+];
 
 export class GameSimulation {
   public arena: ArenaConfig = DEFAULT_ARENA;
@@ -187,6 +202,8 @@ export class GameSimulation {
     pyro: 0,
     titan: 0,
     reaper: 0,
+    shield_bearer: 0,
+    corruptor: 0,
   };
   private surgeScheduleTimer = 4.2;
   private overchargeTickTimer = 0;
@@ -215,11 +232,27 @@ export class GameSimulation {
     this.bestScore = saved.bestScore;
     this.selectedHeroClass = saved.selectedHeroClass;
     this.evolutionPoints = saved.evolutionPoints;
+    this.emberSouls = saved.emberSouls ?? 10;
+    this.talents = saved.talents ?? { critMastery: 0, manaRegen: 0, ringReach: 0, towerDiscount: 0 };
     this.heroRoster = saved.heroes;
     this.convergenceStages = saved.convergenceStages;
     this.heroes = [this.createHeroFromRoster(this.selectedHeroClass, 's1-5', 545, 295)];
     this.resetWorld('title', 1, this.selectedHeroClass);
   }
+
+  public emberSouls = 10;
+  public talents: Record<string, number> = {
+    critMastery: 0,
+    manaRegen: 0,
+    ringReach: 0,
+    towerDiscount: 0,
+  };
+  public pendingPactChoices: PactOption[] | null = null;
+  public activePacts: string[] = [];
+  public ringRotation = 0;
+  public ringHeat = 0;
+  public burnZones: { x: number; y: number; radius: number; life: number }[] = [];
+  public acidStormZones: { x: number; y: number; radius: number; life: number; damage: number; damageTimer?: number }[] = [];
 
   public get hero(): HeroEntity {
     return this.heroes[this.activeHeroIndex] ?? this.heroes[0];
@@ -239,9 +272,51 @@ export class GameSimulation {
       bestScore: this.bestScore,
       selectedHeroClass: this.selectedHeroClass,
       evolutionPoints: this.evolutionPoints,
+      emberSouls: this.emberSouls,
+      talents: this.talents,
       heroes: this.heroRoster,
       convergenceStages: this.convergenceStages,
     });
+  }
+
+  public upgradeTalent(talentId: string): boolean {
+    const spec = TALENT_SPECS[talentId];
+    if (!spec) return false;
+    const current = this.talents[talentId] ?? 0;
+    if (current >= spec.maxLevel) return false;
+    const cost = spec.baseCost * (current + 1);
+    if (this.emberSouls < cost) return false;
+    this.emberSouls -= cost;
+    this.talents[talentId] = current + 1;
+    this.persistProgress();
+    return true;
+  }
+
+  public selectPact(pactId: string): boolean {
+    if (!this.pendingPactChoices) return false;
+    const pact = this.pendingPactChoices.find((p) => p.id === pactId);
+    if (!pact) return false;
+    this.activePacts.push(pactId);
+    this.pendingPactChoices = null;
+    this.triggerRewardBanner(`PACTO: ${pact.title}`, pact.description, pact.tone, 1.8);
+    return true;
+  }
+
+  public rotateRing(delta: number) {
+    if (this.ringHeat >= 0.95) return;
+    this.ringRotation += delta;
+    this.ringHeat = Math.min(1, this.ringHeat + 0.15);
+    soundEngine.playShieldBash();
+    for (const enemy of this.enemies) {
+      if (enemy.isDead) continue;
+      const dist = distanceBetween(this.arena.centerX, this.arena.centerY, enemy.x, enemy.y);
+      if (dist <= 220) {
+        const branch = this.arena.routes[enemy.routeIndex] ?? this.arena.routes[0];
+        const totalLen = this.routeTotalLengths[enemy.routeIndex] ?? this.routeTotalLength;
+        pushEnemyBackAlongRoute(enemy, branch.waypoints, 75, totalLen);
+        this.handleEnemyDamaged(enemy, 35, 0, 0, true, false, undefined);
+      }
+    }
   }
 
   private createHeroFromRoster(
@@ -2777,6 +2852,12 @@ export class GameSimulation {
       pendingUpgradeHeroClass: this.pendingUpgradeHeroClass,
       heroUpgradesCount: this.heroUpgradesCount,
       paladinAuraActive: this.units.some((u) => u.kind === 'paladin' && u.hp > 0),
+      emberSouls: this.emberSouls,
+      talents: { ...this.talents },
+      pendingPactChoices: this.pendingPactChoices ? [...this.pendingPactChoices] : null,
+      activePacts: [...this.activePacts],
+      ringRotation: this.ringRotation,
+      ringHeat: this.ringHeat,
     };
   }
 }

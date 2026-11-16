@@ -25,6 +25,7 @@ interface GameHUDProps {
   onTogglePause: () => void;
   onToggleMuteMusic: () => void;
   onToggleMuteSfx: () => void;
+  onRotateRing: (delta: number) => void;
   onRestart: () => void;
 }
 
@@ -80,6 +81,7 @@ export const GameHUD: React.FC<GameHUDProps> = ({
   onTogglePause,
   onToggleMuteMusic,
   onToggleMuteSfx,
+  onRotateRing,
   onRestart,
 }) => {
   const [ghostHp, setGhostHp] = useState(hud.baseHp);
@@ -511,6 +513,38 @@ export const GameHUD: React.FC<GameHUDProps> = ({
             </button>
           );
         })}
+
+        {/* Dynamic Modular Ring Rotation Widget */}
+        <div className="mt-2 flex items-center gap-1 rounded-xl border-2 border-[#334155] bg-[#0F172A]/95 p-1.5 shadow-[0_4px_0_rgba(2,6,23,0.75)]">
+          <button
+            type="button"
+            tabIndex={-1}
+            onClick={() => {
+              soundEngine.playClick();
+              onRotateRing(-Math.PI * 0.25);
+            }}
+            className="flex h-8 w-8 items-center justify-center rounded-lg bg-[#1E293B] text-white hover:bg-[#334155]"
+            title="Girar Anel Sentido Anti-Horário"
+          >
+            ↺
+          </button>
+          <div className="flex flex-col items-center px-1 leading-tight">
+            <span className="text-[9px] font-bold text-[#FACC15] uppercase">Anel 360°</span>
+            <span className="font-mono-tabular text-[10px] text-[#00D4FF]">Calor {Math.round(hud.ringHeat * 100)}%</span>
+          </div>
+          <button
+            type="button"
+            tabIndex={-1}
+            onClick={() => {
+              soundEngine.playClick();
+              onRotateRing(Math.PI * 0.25);
+            }}
+            className="flex h-8 w-8 items-center justify-center rounded-lg bg-[#1E293B] text-white hover:bg-[#334155]"
+            title="Girar Anel Sentido Horário & Empurrar Inimigos"
+          >
+            ↻
+          </button>
+        </div>
       </div>
 
       {/* Bottom Support Troop Recruitment Dock (Dynamically unlocked Allies from ALLY_ALBUM) */}

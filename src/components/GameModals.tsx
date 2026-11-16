@@ -38,6 +38,7 @@ import {
   MAX_HERO_LEVEL,
   TOTAL_STAGES,
 } from '../game/types';
+import { TALENT_SPECS } from '../game/simulation';
 import { AlbumTab } from './AlbumModal';
 
 interface GameModalsProps {
@@ -47,6 +48,8 @@ interface GameModalsProps {
   onSelectHero: (heroClass: HeroClass) => void;
   onSelectStage: (stage: number) => void;
   onSelectUpgrade: (upgradeId: HeroUpgradeId) => void;
+  onUpgradeTalent: (talentId: string) => void;
+  onSelectPact: (pactId: string) => void;
   onStart: (stage?: number) => void;
   onNextStage: () => void;
   onResume: () => void;
@@ -96,6 +99,8 @@ export const GameModals: React.FC<GameModalsProps> = ({
   onSelectHero,
   onSelectStage,
   onSelectUpgrade,
+  onUpgradeTalent,
+  onSelectPact,
   onStart,
   onNextStage,
   onResume,
@@ -106,10 +111,50 @@ export const GameModals: React.FC<GameModalsProps> = ({
   const [chapterIndex, setChapterIndex] = useState(() =>
     Math.floor((Math.max(1, selectedStage) - 1) / STAGES_PER_CHAPTER)
   );
+  const [showTalentsModal, setShowTalentsModal] = useState(false);
 
   useEffect(() => {
     setChapterIndex(Math.floor((Math.max(1, selectedStage) - 1) / STAGES_PER_CHAPTER));
   }, [selectedStage]);
+
+  // Show Pact Choice Modal if pendingPactChoices is active
+  if (hud.phase === 'playing' && hud.pendingPactChoices && hud.pendingPactChoices.length > 0) {
+    return (
+      <div className="fixed inset-0 z-40 flex items-center justify-center bg-black/75 p-4">
+        <div className="w-full max-w-md rounded-2xl border-2 border-[#00D4FF] bg-[#0F172A] p-5 text-center shadow-[0_12px_32px_rgba(0,0,0,0.85)]">
+          <div className="mx-auto mb-2 flex h-12 w-12 items-center justify-center rounded-xl border border-[#00D4FF] bg-[#082F49] text-[#00D4FF]">
+            <Sparkles className="h-6 w-6" />
+          </div>
+          <h2 className="font-display text-xl font-bold text-[#00D4FF]">Escolha de Pacto (Wave {hud.wave})</h2>
+          <p className="mt-1 text-xs text-[#94A3B8]">Cada pacto concede poder formidável com um custo de risco.</p>
+          <div className="mt-4 flex flex-col gap-2.5">
+            {hud.pendingPactChoices.map((pact) => {
+              const border =
+                pact.tone === 'crimson'
+                  ? 'border-[#FF2E4C] hover:bg-[#450A0A]'
+                  : pact.tone === 'electric'
+                    ? 'border-[#00D4FF] hover:bg-[#082F49]'
+                    : 'border-[#FACC15] hover:bg-[#422006]';
+              return (
+                <button
+                  key={pact.id}
+                  type="button"
+                  onClick={() => {
+                    soundEngine.playClick();
+                    onSelectPact(pact.id);
+                  }}
+                  className={`flex flex-col rounded-xl border-2 bg-[#080D1A] p-3 text-left transition-transform active:translate-y-0.5 ${border}`}
+                >
+                  <div className="font-display text-sm font-bold text-white">{pact.title}</div>
+                  <div className="mt-1 text-xs text-[#CBD5E1]">{pact.description}</div>
+                </button>
+              );
+            })}
+          </div>
+        </div>
+      </div>
+    );
+  }
 
   // Show Upgrade Milestone Modal whenever a hero hits a 5-level milestone (in Menu or in Combat!)
   if (
@@ -355,10 +400,10 @@ export const GameModals: React.FC<GameModalsProps> = ({
             </div>
           </section>
 
-          {/* 2. Two Main Menu Album Systems: 50 Enemies & 10 Allies */}
+          {/* 2. Two Main Menu Album Systems + Talents Tree */}
           <section
-            aria-label="Álbuns de Coleção"
-            className="grid w-full grid-cols-1 gap-2 sm:grid-cols-2 sm:gap-2.5"
+            aria-label="Álbuns e Talentos"
+            className="grid w-full grid-cols-1 gap-2 sm:grid-cols-3 sm:gap-2.5"
           >
             <button
               type="button"
@@ -413,7 +458,96 @@ export const GameModals: React.FC<GameModalsProps> = ({
                 Abrir →
               </span>
             </button>
+
+            <button
+              type="button"
+              data-testid="open-talents-modal"
+              onClick={() => {
+                soundEngine.playClick();
+                setShowTalentsModal(true);
+              }}
+              className="flex items-center justify-between gap-3 rounded-2xl border-2 border-[#B45309] bg-[#0F172A]/95 px-4 py-2.5 text-left shadow-[0_5px_0_rgba(2,6,23,0.85)] transition-transform hover:-translate-y-0.5 hover:border-[#FACC15]"
+            >
+              <div className="flex items-center gap-3 min-w-0">
+                <div className="flex h-10 w-10 shrink-0 items-center justify-center rounded-xl border border-[#FACC15]/50 bg-[#422006] text-[#FACC15]">
+                  <Sparkles className="h-5 w-5" />
+                </div>
+                <div className="min-w-0">
+                  <div className="font-display text-sm font-bold text-white sm:text-base">
+                    Talentos de Brasa
+                  </div>
+                  <div className="font-mono-tabular text-[11px] font-semibold text-[#FACC15]">
+                    {hud.emberSouls} Almas
+                  </div>
+                </div>
+              </div>
+              <span className="font-mono-tabular shrink-0 text-xs font-bold whitespace-nowrap text-[#FACC15]">
+                Árvore →
+              </span>
+            </button>
           </section>
+
+          {/* Talents Tree Modal */}
+          {showTalentsModal && (
+            <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/80 p-4">
+              <div className="w-full max-w-lg rounded-3xl border-2 border-[#FACC15] bg-[#0F172A] p-5 text-left shadow-[0_12px_36px_rgba(0,0,0,0.9)]">
+                <div className="flex items-center justify-between border-b border-white/10 pb-3">
+                  <div className="flex items-center gap-2.5">
+                    <div className="flex h-10 w-10 items-center justify-center rounded-xl bg-[#422006] text-[#FACC15]">
+                      <Sparkles className="h-5 w-5" />
+                    </div>
+                    <div>
+                      <h3 className="font-display text-lg font-bold text-[#FACC15]">Árvore de Talentos Permanentes</h3>
+                      <div className="font-mono-tabular text-xs text-[#00D4FF]">Almas de Brasa disponíveis: {hud.emberSouls}</div>
+                    </div>
+                  </div>
+                  <button
+                    type="button"
+                    onClick={() => {
+                      soundEngine.playClick();
+                      setShowTalentsModal(false);
+                    }}
+                    className="rounded-xl border border-[#334155] bg-[#1E293B] px-3 py-1.5 text-xs font-bold text-white hover:bg-[#334155]"
+                  >
+                    Fechar
+                  </button>
+                </div>
+                <div className="mt-4 flex flex-col gap-3">
+                  {Object.entries(TALENT_SPECS).map(([talentId, spec]) => {
+                    const currentLevel = hud.talents[talentId] ?? 0;
+                    const isMax = currentLevel >= spec.maxLevel;
+                    const cost = spec.baseCost * (currentLevel + 1);
+                    const canAfford = hud.emberSouls >= cost && !isMax;
+
+                    return (
+                      <div key={talentId} className="flex items-center justify-between gap-3 rounded-2xl border border-[#334155] bg-[#080D1A] p-3">
+                        <div className="min-w-0 flex-1">
+                          <div className="flex items-center gap-2">
+                            <span className="font-display text-sm font-bold text-white">{spec.name}</span>
+                            <span className="font-mono-tabular text-xs text-[#00D4FF]">
+                              Nv.{currentLevel}/{spec.maxLevel}
+                            </span>
+                          </div>
+                          <p className="mt-0.5 text-xs text-[#94A3B8]">{spec.description}</p>
+                        </div>
+                        <button
+                          type="button"
+                          disabled={!canAfford}
+                          onClick={() => {
+                            soundEngine.playClick();
+                            onUpgradeTalent(talentId);
+                          }}
+                          className="font-mono-tabular shrink-0 rounded-xl border border-[#FACC15] bg-[#422006] px-3 py-2 text-xs font-bold text-[#FACC15] transition-transform active:translate-y-0.5 hover:bg-[#78350F] disabled:cursor-not-allowed disabled:opacity-40"
+                        >
+                          {isMax ? 'MÁX' : `Evoluir (${cost} Almas)`}
+                        </button>
+                      </div>
+                    );
+                  })}
+                </div>
+              </div>
+            </div>
+          )}
 
           {/* 3. Dynamic 1-4 Route & Convergence Stage Selector */}
           <section

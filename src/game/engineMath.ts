@@ -1724,6 +1724,8 @@ export function computeWaveConfig(
       pyro: pyroWeight,
       titan: titanWeight,
       reaper: reaperWeight,
+      shield_bearer: 0,
+      corruptor: 0,
     },
   };
 }

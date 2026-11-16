@@ -23,7 +23,9 @@ export type EnemyKind =
   | 'pyro'
   | 'titan'
   | 'reaper'
-  | 'boss';
+  | 'boss'
+  | 'shield_bearer'
+  | 'corruptor';
 
 export type EnemyArchetype =
   | 'beast'
@@ -491,6 +493,21 @@ export interface ActiveHeroSummary {
   isFreePlaced: boolean;
 }
 
+export interface PactOption {
+  id: string;
+  title: string;
+  description: string;
+  tone: 'crimson' | 'gold' | 'electric';
+}
+
+export interface TalentNode {
+  id: string;
+  name: string;
+  description: string;
+  maxLevel: number;
+  baseCost: number;
+}
+
 export interface HudSnapshot {
   phase: GamePhase;
   stage: number;
@@ -544,6 +561,12 @@ export interface HudSnapshot {
   pendingUpgradeHeroClass: HeroClass | null;
   heroUpgradesCount: number;
   paladinAuraActive: boolean;
+  emberSouls: number;
+  talents: Record<string, number>;
+  pendingPactChoices: PactOption[] | null;
+  activePacts: string[];
+  ringRotation: number;
+  ringHeat: number;
 }
 
 export const HERO_SPECS: Record<HeroClass, HeroSpec> = {

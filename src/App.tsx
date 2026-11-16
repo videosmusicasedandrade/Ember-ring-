@@ -234,6 +234,38 @@ export default function App() {
     [syncHud]
   );
 
+  const handleUpgradeTalent = useCallback(
+    (talentId: string) => {
+      const sim = simRef.current;
+      if (!sim) return;
+      if (sim.upgradeTalent(talentId)) {
+        syncHud();
+      }
+    },
+    [syncHud]
+  );
+
+  const handleSelectPact = useCallback(
+    (pactId: string) => {
+      const sim = simRef.current;
+      if (!sim) return;
+      if (sim.selectPact(pactId)) {
+        syncHud();
+      }
+    },
+    [syncHud]
+  );
+
+  const handleRotateRing = useCallback(
+    (delta: number) => {
+      const sim = simRef.current;
+      if (!sim) return;
+      sim.rotateRing(delta);
+      syncHud();
+    },
+    [syncHud]
+  );
+
   const handleActivateSpell = useCallback(
     (kind: SpellKind) => {
       const sim = simRef.current;
@@ -353,6 +385,7 @@ export default function App() {
         onTogglePause={handleTogglePause}
         onToggleMuteMusic={handleToggleMuteMusic}
         onToggleMuteSfx={handleToggleMuteSfx}
+        onRotateRing={handleRotateRing}
         onRestart={() => handleStart(hud.stage)}
       />
       <GameModals
@@ -362,6 +395,8 @@ export default function App() {
         onSelectHero={handleSelectHero}
         onSelectStage={handleSelectStage}
         onSelectUpgrade={handleSelectUpgrade}
+        onUpgradeTalent={handleUpgradeTalent}
+        onSelectPact={handleSelectPact}
         onStart={handleStart}
         onNextStage={handleNextStage}
         onResume={handleResume}

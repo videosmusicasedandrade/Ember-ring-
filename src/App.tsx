@@ -11,6 +11,7 @@ import {
   HeroClass,
   HeroUpgradeId,
   HudSnapshot,
+  PetKind,
   RingSkinId,
   SpellKind,
   TOTAL_STAGES,
@@ -84,6 +85,8 @@ export default function App() {
     document.body.dataset.combo = String(snap.comboCount);
     document.body.dataset.targeting = snap.targetingSpell ?? '';
     document.body.dataset.overcharge = snap.overchargeTimer > 0 ? '1' : '0';
+    document.body.dataset.pet = snap.selectedPet;
+    document.body.dataset.dropLuck = String(snap.petDropLuckBonus);
   }, []);
 
   const syncHud = useCallback(() => {
@@ -103,6 +106,16 @@ export default function App() {
       const sim = simRef.current;
       if (!sim) return;
       sim.setHeroClass(heroClass);
+      syncHud();
+    },
+    [syncHud]
+  );
+
+  const handleSelectPet = useCallback(
+    (pet: PetKind) => {
+      const sim = simRef.current;
+      if (!sim) return;
+      sim.setSelectedPet(pet);
       syncHud();
     },
     [syncHud]
@@ -405,6 +418,7 @@ export default function App() {
         onStartCardDrag={handleStartCardDrag}
         onToggleHeroReposition={handleToggleHeroReposition}
         onSelectActiveHero={handleSelectActiveHero}
+        onSelectPet={handleSelectPet}
         onActivateSpell={handleActivateSpell}
         onTogglePause={handleTogglePause}
         onToggleMuteMusic={handleToggleMuteMusic}
@@ -417,6 +431,7 @@ export default function App() {
         selectedStage={selectedStage}
         convergenceStages={simRef.current!.convergenceStages}
         onSelectHero={handleSelectHero}
+        onSelectPet={handleSelectPet}
         onSelectStage={handleSelectStage}
         onSelectUpgrade={handleSelectUpgrade}
         onUpgradeTalent={handleUpgradeTalent}

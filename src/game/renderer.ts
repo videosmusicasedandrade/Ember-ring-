@@ -1,4 +1,10 @@
-import { canMergeUnits, isEliteEnemy, isValidFreeHeroPosition, pointToSegmentDistance } from './engineMath';
+import {
+  canMergeUnits,
+  computeCastlePetPosition,
+  isEliteEnemy,
+  isValidFreeHeroPosition,
+  pointToSegmentDistance,
+} from './engineMath';
 import { GameSimulation } from './simulation';
 import {
   ArenaConfig,
@@ -8,6 +14,9 @@ import {
   HeroEntity,
   MAX_HERO_LEVEL,
   MAX_UNIT_LEVEL,
+  PET_SPECS,
+  PetKind,
+  RING_SKINS,
   RouteWaypoint,
   UNIT_SPECS,
   UnitEntity,
@@ -296,14 +305,15 @@ export class ArenaRenderer {
 
     // 0.5 Modular Ember Ring Visual Guide & Elemental Ground Zones
     if (sim.ringRotation !== 0 || sim.ringHeat > 0.01) {
+      const skin = RING_SKINS[sim.equippedRingSkin] ?? RING_SKINS.classic;
       ctx.save();
       ctx.translate(arena.centerX, arena.centerY);
       ctx.rotate(sim.ringRotation);
       ctx.strokeStyle =
         sim.ringHeat > 0.75
-          ? 'rgba(255, 46, 76, 0.35)'
-          : 'rgba(250, 204, 21, 0.22)';
-      ctx.lineWidth = 2.5;
+          ? 'rgba(255, 46, 76, 0.42)'
+          : skin.glowColor;
+      ctx.lineWidth = 2.8;
       ctx.setLineDash([12, 10]);
       ctx.beginPath();
       ctx.arc(0, 0, 210, 0, Math.PI * 2);
@@ -517,9 +527,16 @@ export class ArenaRenderer {
       ctx.restore();
     }
 
-    // 3. Multi-Gate Portals & Castle
+    // 3. Multi-Gate Portals, Castle & Stationary Passive Guardian Pet (~80% Castle scale)
     this.drawSpawnPortals(ctx, sim);
-    this.drawCastleBase(ctx, sim);
+    const petPos = computeCastlePetPosition(sim.arena);
+    if (petPos.y < sim.arena.castleY) {
+      this.drawCastleGuardianPet(ctx, sim, petPos.x, petPos.y);
+      this.drawCastleBase(ctx, sim);
+    } else {
+      this.drawCastleBase(ctx, sim);
+      this.drawCastleGuardianPet(ctx, sim, petPos.x, petPos.y);
+    }
 
     // 4. Depth-sorted actors (1 or 3 Main Heroes + Units + Enemies)
     type RenderItem =
@@ -1257,6 +1274,799 @@ export class ArenaRenderer {
     ctx.fillText(lvlText, 0, -104);
 
     ctx.restore();
+  }
+
+  private drawCharmStar(ctx: CanvasRenderingContext2D, x: number, y: number, r: number, color: string) {
+    ctx.fillStyle = color;
+    ctx.beginPath();
+    ctx.moveTo(x, y - r);
+    ctx.quadraticCurveTo(x + r * 0.22, y - r * 0.22, x + r, y);
+    ctx.quadraticCurveTo(x + r * 0.22, y + r * 0.22, x, y + r);
+    ctx.quadraticCurveTo(x - r * 0.22, y + r * 0.22, x - r, y);
+    ctx.quadraticCurveTo(x - r * 0.22, y - r * 0.22, x, y - r);
+    ctx.closePath();
+    ctx.fill();
+  }
+
+  private drawCastleGuardianPet(
+    ctx: CanvasRenderingContext2D,
+    sim: GameSimulation,
+    px: number,
+    py: number
+  ) {
+    const pet: PetKind = sim.selectedPet;
+    const spec = PET_SPECS[pet];
+    const t = sim.time;
+    const breath = Math.sin(t * 2.8);
+    const hover = Math.sin(t * 2.2) * 2.6;
+    const pulse = 0.92 + Math.sin(t * 3.4) * 0.08;
+    const switchPop = sim.petSwitchFlash > 0 ? 1 + Math.sin(sim.petSwitchFlash * Math.PI) * 0.12 : 1;
+
+    // Visual scale tuned so Pet + pedestal/aura spans ~80% of Castle's visual height (~95px vs ~120px Castle)
+    const petScale = 1.04 * switchPop;
+
+    ctx.save();
+    ctx.translate(px, py);
+
+    // 1. Soft Enveloping "Amuleto da Sorte" (Lucky Charm) Outer Aura Glow
+    const auraRadius = 58 * pulse;
+    const outerGlow = ctx.createRadialGradient(0, -10, 8, 0, -10, auraRadius);
+    outerGlow.addColorStop(0, spec.auraInner);
+    outerGlow.addColorStop(0.55, spec.glowColor.replace('0.55', '0.2').replace('0.58', '0.24'));
+    outerGlow.addColorStop(1, spec.auraOuter);
+    ctx.fillStyle = outerGlow;
+    ctx.beginPath();
+    ctx.arc(0, -10, auraRadius, 0, Math.PI * 2);
+    ctx.fill();
+
+    // Golden warm lucky-charm core shimmer behind pet
+    const charmCore = ctx.createRadialGradient(0, -14, 4, 0, -14, 34 * pulse);
+    charmCore.addColorStop(0, 'rgba(254, 240, 138, 0.34)');
+    charmCore.addColorStop(0.65, 'rgba(250, 204, 21, 0.1)');
+    charmCore.addColorStop(1, 'rgba(250, 204, 21, 0)');
+    ctx.fillStyle = charmCore;
+    ctx.beginPath();
+    ctx.arc(0, -14, 34 * pulse, 0, Math.PI * 2);
+    ctx.fill();
+
+    // Switch transition charm burst ring
+    if (sim.petSwitchFlash > 0) {
+      const burstProg = 1 - sim.petSwitchFlash;
+      ctx.save();
+      ctx.globalAlpha = sim.petSwitchFlash * 0.85;
+      ctx.strokeStyle = spec.accentColor;
+      ctx.lineWidth = 4 * sim.petSwitchFlash;
+      ctx.beginPath();
+      ctx.arc(0, -10, 26 + burstProg * 44, 0, Math.PI * 2);
+      ctx.stroke();
+      ctx.restore();
+    }
+
+    // 2. Ground Shadow & Rotating Sacred Amulet Talisman Seal
+    ctx.fillStyle = 'rgba(2, 6, 23, 0.56)';
+    ctx.beginPath();
+    ctx.ellipse(0, 34, 42, 14, 0, 0, Math.PI * 2);
+    ctx.fill();
+
+    ctx.save();
+    ctx.translate(0, 28);
+    ctx.scale(1, 0.36);
+    ctx.rotate(t * 0.48);
+
+    ctx.strokeStyle = spec.primaryColor;
+    ctx.globalAlpha = 0.65;
+    ctx.lineWidth = 2.6;
+    ctx.beginPath();
+    ctx.arc(0, 0, 42, 0, Math.PI * 2);
+    ctx.stroke();
+
+    ctx.strokeStyle = '#FACC15';
+    ctx.globalAlpha = 0.72;
+    ctx.lineWidth = 1.8;
+    ctx.setLineDash([7, 7]);
+    ctx.beginPath();
+    ctx.arc(0, 0, 34, 0, Math.PI * 2);
+    ctx.stroke();
+    ctx.setLineDash([]);
+
+    // 6 sacred rune diamonds on the amulet halo
+    for (let i = 0; i < 6; i++) {
+      const a = (i * Math.PI * 2) / 6;
+      const rx = Math.cos(a) * 38;
+      const ry = Math.sin(a) * 38;
+      ctx.fillStyle = i % 2 === 0 ? '#FEF08A' : spec.primaryColor;
+      ctx.beginPath();
+      ctx.arc(rx, ry, 3.2, 0, Math.PI * 2);
+      ctx.fill();
+    }
+    ctx.restore();
+
+    // 3. Stylized 2D Dark-Mystical Pet Body (Stationary Guardian with gentle breathing & hover)
+    ctx.save();
+    ctx.translate(0, hover);
+    ctx.scale(petScale * (1 + breath * 0.022), petScale * (1 - breath * 0.028));
+
+    if (pet === 'turtle') {
+      this.drawTurtlePetBody(ctx, t);
+    } else if (pet === 'tiger') {
+      this.drawTigerPetBody(ctx, t);
+    } else if (pet === 'rabbit') {
+      this.drawRabbitPetBody(ctx, t);
+    } else if (pet === 'owl') {
+      this.drawOwlPetBody(ctx, t);
+    } else {
+      this.drawCatPetBody(ctx, t);
+    }
+    ctx.restore();
+
+    // 4. Orbiting Lucky-Charm 4-Point Sparkles (deterministic trigonometric, 60 FPS zero-GC)
+    for (let i = 0; i < 5; i++) {
+      const ang = t * 1.15 + (i * Math.PI * 2) / 5;
+      const sx = Math.cos(ang) * (39 + (i % 2) * 7);
+      const sy = -12 + Math.sin(ang * 1.4) * 26;
+      const twinkle = 0.45 + 0.55 * Math.sin(t * 4.5 + i * 1.7);
+      ctx.save();
+      ctx.globalAlpha = twinkle;
+      this.drawCharmStar(ctx, sx, sy, 4.2 + (i % 2) * 1.8, i % 2 === 0 ? '#FEF08A' : spec.primaryColor);
+      ctx.restore();
+    }
+
+    // 5. Crisp Guardian Label matching Castle typography
+    ctx.font = '800 11.5px "Fredoka", sans-serif';
+    ctx.textAlign = 'center';
+    ctx.lineWidth = 3.8;
+    ctx.strokeStyle = '#020617';
+    const label = spec.name;
+    ctx.strokeText(label, 0, -60);
+    ctx.fillStyle = spec.accentColor;
+    ctx.fillText(label, 0, -60);
+
+    ctx.restore();
+  }
+
+  private drawTurtlePetBody(ctx: CanvasRenderingContext2D, t: number) {
+    const outline = '#020617';
+    const shimmer = 0.72 + Math.sin(t * 3.8) * 0.28;
+
+    // Back & front sturdy mystical flippers
+    ctx.fillStyle = '#047857';
+    ctx.strokeStyle = outline;
+    ctx.lineWidth = 2.6;
+    for (const fx of [-26, 22]) {
+      ctx.beginPath();
+      ctx.ellipse(fx, 18, 12, 7.5, fx < 0 ? -0.25 : 0.25, 0, Math.PI * 2);
+      ctx.fill();
+      ctx.stroke();
+    }
+
+    // Small pointed tail on right
+    ctx.fillStyle = '#065F46';
+    ctx.beginPath();
+    ctx.moveTo(28, 12);
+    ctx.lineTo(39, 15);
+    ctx.lineTo(29, 20);
+    ctx.closePath();
+    ctx.fill();
+    ctx.stroke();
+
+    // Golden-bronze underside rim of the fortress shell
+    ctx.fillStyle = '#B45309';
+    ctx.beginPath();
+    ctx.ellipse(2, 12, 34, 12, 0, 0, Math.PI * 2);
+    ctx.fill();
+    ctx.stroke();
+
+    // Grand domed jade crystal carapace
+    const shellGrad = ctx.createLinearGradient(0, -34, 0, 14);
+    shellGrad.addColorStop(0, '#34D399');
+    shellGrad.addColorStop(0.45, '#10B981');
+    shellGrad.addColorStop(1, '#064E3B');
+    ctx.fillStyle = shellGrad;
+    ctx.beginPath();
+    ctx.arc(2, 10, 32, Math.PI, 0);
+    ctx.quadraticCurveTo(2, 18, -30, 10);
+    ctx.closePath();
+    ctx.fill();
+    ctx.stroke();
+
+    // Glowing hexagonal runic plates on shell
+    ctx.strokeStyle = '#FACC15';
+    ctx.lineWidth = 2;
+    ctx.beginPath();
+    ctx.moveTo(-10, -14);
+    ctx.lineTo(2, -21);
+    ctx.lineTo(14, -14);
+    ctx.lineTo(14, -1);
+    ctx.lineTo(2, 6);
+    ctx.lineTo(-10, -1);
+    ctx.closePath();
+    ctx.stroke();
+
+    // Central luminous emerald-gold shield gem
+    ctx.save();
+    ctx.globalAlpha = shimmer;
+    ctx.fillStyle = '#A7F3D0';
+    ctx.beginPath();
+    ctx.moveTo(2, -16);
+    ctx.lineTo(9, -8);
+    ctx.lineTo(2, 1);
+    ctx.lineTo(-5, -8);
+    ctx.closePath();
+    ctx.fill();
+    ctx.restore();
+
+    // Wise guardian head facing left toward the Castle & battlefield
+    ctx.fillStyle = '#10B981';
+    ctx.strokeStyle = outline;
+    ctx.lineWidth = 2.6;
+    ctx.beginPath();
+    ctx.arc(-28, -2, 13.5, 0, Math.PI * 2);
+    ctx.fill();
+    ctx.stroke();
+
+    // Golden forehead crest / amulet gem
+    ctx.fillStyle = '#FACC15';
+    ctx.beginPath();
+    ctx.moveTo(-29, -15);
+    ctx.lineTo(-24, -8);
+    ctx.lineTo(-29, -4);
+    ctx.lineTo(-34, -8);
+    ctx.closePath();
+    ctx.fill();
+
+    // Luminous golden eye
+    ctx.fillStyle = '#FEF08A';
+    ctx.beginPath();
+    ctx.arc(-33, -3, 3.6, 0, Math.PI * 2);
+    ctx.fill();
+    ctx.fillStyle = '#020617';
+    ctx.beginPath();
+    ctx.arc(-34, -3, 1.7, 0, Math.PI * 2);
+    ctx.fill();
+
+    // Gentle serene smile
+    ctx.strokeStyle = '#022C22';
+    ctx.lineWidth = 1.8;
+    ctx.beginPath();
+    ctx.arc(-33, 3, 4.5, 0.2, 1.3);
+    ctx.stroke();
+  }
+
+  private drawTigerPetBody(ctx: CanvasRenderingContext2D, t: number) {
+    const outline = '#020617';
+    const tailWag = Math.sin(t * 3.2) * 5;
+
+    // Curled fiery striped tail behind body
+    ctx.strokeStyle = '#EA580C';
+    ctx.lineWidth = 7.5;
+    ctx.lineCap = 'round';
+    ctx.beginPath();
+    ctx.moveTo(16, 16);
+    ctx.quadraticCurveTo(36, 14 + tailWag * 0.5, 34, -6 + tailWag);
+    ctx.stroke();
+    ctx.strokeStyle = outline;
+    ctx.lineWidth = 2.2;
+    ctx.stroke();
+    // Glowing amber tail tip
+    ctx.fillStyle = '#FDE047';
+    ctx.beginPath();
+    ctx.arc(34, -8 + tailWag, 4.5, 0, Math.PI * 2);
+    ctx.fill();
+
+    // Seated proud guardian body
+    const bodyGrad = ctx.createLinearGradient(0, -18, 0, 26);
+    bodyGrad.addColorStop(0, '#FB923C');
+    bodyGrad.addColorStop(0.6, '#EA580C');
+    bodyGrad.addColorStop(1, '#9A3412');
+    ctx.fillStyle = bodyGrad;
+    ctx.strokeStyle = outline;
+    ctx.lineWidth = 2.6;
+    ctx.beginPath();
+    ctx.ellipse(2, 8, 22, 20, 0, 0, Math.PI * 2);
+    ctx.fill();
+    ctx.stroke();
+
+    // Cream-gold chest fur
+    ctx.fillStyle = '#FEF3C7';
+    ctx.beginPath();
+    ctx.ellipse(-4, 10, 11, 13, 0, 0, Math.PI * 2);
+    ctx.fill();
+
+    // Front guardian paws
+    ctx.fillStyle = '#F97316';
+    for (const px of [-12, 8]) {
+      ctx.beginPath();
+      ctx.roundRect(px - 6, 14, 12, 14, 6);
+      ctx.fill();
+      ctx.stroke();
+    }
+
+    // Obsidian tiger flank stripes
+    ctx.fillStyle = '#1E1B4B';
+    ctx.beginPath();
+    ctx.moveTo(12, 0);
+    ctx.lineTo(22, 3);
+    ctx.lineTo(14, 7);
+    ctx.closePath();
+    ctx.fill();
+    ctx.beginPath();
+    ctx.moveTo(11, 10);
+    ctx.lineTo(21, 13);
+    ctx.lineTo(13, 16);
+    ctx.closePath();
+    ctx.fill();
+
+    // Blazing golden-ruby collar amulet
+    ctx.strokeStyle = '#DC2626';
+    ctx.lineWidth = 4;
+    ctx.beginPath();
+    ctx.arc(-2, -6, 15, 0.35, Math.PI - 0.35);
+    ctx.stroke();
+    ctx.fillStyle = '#FACC15';
+    ctx.strokeStyle = outline;
+    ctx.lineWidth = 2;
+    ctx.beginPath();
+    ctx.arc(-2, 8, 5.5, 0, Math.PI * 2);
+    ctx.fill();
+    ctx.stroke();
+    ctx.fillStyle = '#FF2E4C';
+    ctx.beginPath();
+    ctx.arc(-2, 8, 2.5, 0, Math.PI * 2);
+    ctx.fill();
+
+    // Rounded tiger ears
+    ctx.fillStyle = '#EA580C';
+    ctx.strokeStyle = outline;
+    ctx.lineWidth = 2.5;
+    for (const ex of [-15, 11]) {
+      ctx.beginPath();
+      ctx.arc(ex, -34, 7.5, 0, Math.PI * 2);
+      ctx.fill();
+      ctx.stroke();
+      ctx.fillStyle = '#FDE68A';
+      ctx.beginPath();
+      ctx.arc(ex, -34, 3.6, 0, Math.PI * 2);
+      ctx.fill();
+      ctx.fillStyle = '#EA580C';
+    }
+
+    // Fierce majestic tiger head
+    const headGrad = ctx.createRadialGradient(-4, -22, 3, -2, -20, 21);
+    headGrad.addColorStop(0, '#FDBA74');
+    headGrad.addColorStop(0.55, '#F97316');
+    headGrad.addColorStop(1, '#C2410C');
+    ctx.fillStyle = headGrad;
+    ctx.beginPath();
+    ctx.ellipse(-2, -20, 20, 17, 0, 0, Math.PI * 2);
+    ctx.fill();
+    ctx.stroke();
+
+    // Cheek fur tufts
+    ctx.fillStyle = '#FEF3C7';
+    ctx.beginPath();
+    ctx.ellipse(-2, -13, 11, 7.5, 0, 0, Math.PI * 2);
+    ctx.fill();
+
+    // Forehead王/mystic tiger stripes
+    ctx.strokeStyle = '#0F172A';
+    ctx.lineWidth = 2.5;
+    ctx.beginPath();
+    ctx.moveTo(-2, -35);
+    ctx.lineTo(-2, -25);
+    ctx.moveTo(-9, -32);
+    ctx.lineTo(-6, -26);
+    ctx.moveTo(5, -32);
+    ctx.lineTo(2, -26);
+    ctx.stroke();
+
+    // Glowing fierce amber-gold eyes
+    ctx.fillStyle = '#FEF08A';
+    ctx.beginPath();
+    ctx.ellipse(-9.5, -21, 4.2, 3.2, 0.15, 0, Math.PI * 2);
+    ctx.ellipse(5.5, -21, 4.2, 3.2, -0.15, 0, Math.PI * 2);
+    ctx.fill();
+    ctx.fillStyle = '#020617';
+    ctx.beginPath();
+    ctx.arc(-10, -21, 1.8, 0, Math.PI * 2);
+    ctx.arc(5, -21, 1.8, 0, Math.PI * 2);
+    ctx.fill();
+
+    // Nose
+    ctx.fillStyle = '#991B1B';
+    ctx.beginPath();
+    ctx.moveTo(-5, -16);
+    ctx.lineTo(1, -16);
+    ctx.lineTo(-2, -12.5);
+    ctx.closePath();
+    ctx.fill();
+  }
+
+  private drawRabbitPetBody(ctx: CanvasRenderingContext2D, t: number) {
+    const outline = '#020617';
+    const earSway = Math.sin(t * 3.6) * 0.08;
+
+    // Fluffy luminous moonlight tail
+    ctx.fillStyle = '#E0F2FE';
+    ctx.strokeStyle = outline;
+    ctx.lineWidth = 2.4;
+    ctx.beginPath();
+    ctx.arc(20, 14, 9.5, 0, Math.PI * 2);
+    ctx.fill();
+    ctx.stroke();
+
+    // Tall celestial sapphire-tipped ears
+    for (const [ex, rot] of [
+      [-9, -0.18 + earSway],
+      [7, 0.16 - earSway],
+    ] as const) {
+      ctx.save();
+      ctx.translate(ex, -28);
+      ctx.rotate(rot);
+      const earGrad = ctx.createLinearGradient(0, -26, 0, 4);
+      earGrad.addColorStop(0, '#00D4FF');
+      earGrad.addColorStop(0.45, '#E0F2FE');
+      earGrad.addColorStop(1, '#F8FAFC');
+      ctx.fillStyle = earGrad;
+      ctx.strokeStyle = outline;
+      ctx.lineWidth = 2.5;
+      ctx.beginPath();
+      ctx.ellipse(0, -12, 6.2, 19, 0, 0, Math.PI * 2);
+      ctx.fill();
+      ctx.stroke();
+
+      ctx.fillStyle = '#38BDF8';
+      ctx.beginPath();
+      ctx.ellipse(0, -11, 2.8, 12, 0, 0, Math.PI * 2);
+      ctx.fill();
+      ctx.restore();
+    }
+
+    // Agile seated ivory-cyan body
+    const bodyGrad = ctx.createLinearGradient(0, -12, 0, 26);
+    bodyGrad.addColorStop(0, '#F8FAFC');
+    bodyGrad.addColorStop(0.65, '#BAE6FD');
+    bodyGrad.addColorStop(1, '#0284C7');
+    ctx.fillStyle = bodyGrad;
+    ctx.strokeStyle = outline;
+    ctx.lineWidth = 2.6;
+    ctx.beginPath();
+    ctx.ellipse(0, 10, 18.5, 19, 0, 0, Math.PI * 2);
+    ctx.fill();
+    ctx.stroke();
+
+    // Front paws
+    ctx.fillStyle = '#F8FAFC';
+    for (const px of [-8, 7]) {
+      ctx.beginPath();
+      ctx.ellipse(px, 23, 6.5, 4.5, 0, 0, Math.PI * 2);
+      ctx.fill();
+      ctx.stroke();
+    }
+
+    // Arcane celestial collar ribbon & speed charm gem
+    ctx.fillStyle = '#0369A1';
+    ctx.beginPath();
+    ctx.roundRect(-14, -4, 28, 7, 3.5);
+    ctx.fill();
+    ctx.stroke();
+    ctx.fillStyle = '#FACC15';
+    ctx.beginPath();
+    ctx.moveTo(0, -3);
+    ctx.lineTo(5.5, 3);
+    ctx.lineTo(0, 9);
+    ctx.lineTo(-5.5, 3);
+    ctx.closePath();
+    ctx.fill();
+    ctx.stroke();
+
+    // Head
+    ctx.fillStyle = '#F8FAFC';
+    ctx.beginPath();
+    ctx.ellipse(-1, -18, 16.5, 14.5, 0, 0, Math.PI * 2);
+    ctx.fill();
+    ctx.stroke();
+
+    // Golden lunar crescent charm on forehead
+    ctx.strokeStyle = '#FACC15';
+    ctx.lineWidth = 2.4;
+    ctx.beginPath();
+    ctx.arc(-1, -25, 4.2, 0.25 * Math.PI, 1.35 * Math.PI);
+    ctx.stroke();
+
+    // Luminous sapphire-cyan eyes
+    ctx.fillStyle = '#00D4FF';
+    ctx.beginPath();
+    ctx.arc(-8, -17, 3.8, 0, Math.PI * 2);
+    ctx.arc(5.5, -17, 3.8, 0, Math.PI * 2);
+    ctx.fill();
+    ctx.fillStyle = '#FFFFFF';
+    ctx.beginPath();
+    ctx.arc(-9.2, -18.2, 1.4, 0, Math.PI * 2);
+    ctx.arc(4.3, -18.2, 1.4, 0, Math.PI * 2);
+    ctx.fill();
+
+    // Delicate pink-gold nose
+    ctx.fillStyle = '#38BDF8';
+    ctx.beginPath();
+    ctx.arc(-1.5, -13, 2.2, 0, Math.PI * 2);
+    ctx.fill();
+  }
+
+  private drawOwlPetBody(ctx: CanvasRenderingContext2D, t: number) {
+    const outline = '#020617';
+    const wingPulse = Math.sin(t * 2.5) * 1.4;
+
+    // Arcane gilded perch pedestal
+    ctx.fillStyle = '#4C1D95';
+    ctx.strokeStyle = '#FACC15';
+    ctx.lineWidth = 2.2;
+    ctx.beginPath();
+    ctx.roundRect(-24, 21, 48, 7, 3.5);
+    ctx.fill();
+    ctx.stroke();
+
+    // Folded royal violet scalloped wings
+    ctx.fillStyle = '#5B21B6';
+    ctx.strokeStyle = outline;
+    ctx.lineWidth = 2.6;
+    ctx.beginPath();
+    ctx.ellipse(-18 - wingPulse * 0.5, 4, 11, 21, 0.22, 0, Math.PI * 2);
+    ctx.fill();
+    ctx.stroke();
+
+    ctx.beginPath();
+    ctx.ellipse(18 + wingPulse * 0.5, 4, 11, 21, -0.22, 0, Math.PI * 2);
+    ctx.fill();
+    ctx.stroke();
+
+    // Main owl torso
+    const bodyGrad = ctx.createLinearGradient(0, -28, 0, 24);
+    bodyGrad.addColorStop(0, '#9333EA');
+    bodyGrad.addColorStop(0.55, '#6D28D9');
+    bodyGrad.addColorStop(1, '#2E1065');
+    ctx.fillStyle = bodyGrad;
+    ctx.beginPath();
+    ctx.ellipse(0, 3, 20, 24, 0, 0, Math.PI * 2);
+    ctx.fill();
+    ctx.stroke();
+
+    // Starlight-cream feathered belly with golden chevron pattern
+    ctx.fillStyle = '#EDE9FE';
+    ctx.beginPath();
+    ctx.ellipse(0, 8, 12.5, 14, 0, 0, Math.PI * 2);
+    ctx.fill();
+    ctx.strokeStyle = '#A855F7';
+    ctx.lineWidth = 1.6;
+    for (const fy of [3, 9, 15]) {
+      ctx.beginPath();
+      ctx.moveTo(-6, fy);
+      ctx.lineTo(0, fy + 3);
+      ctx.lineTo(6, fy);
+      ctx.stroke();
+    }
+
+    // Golden talons gripping perch
+    ctx.fillStyle = '#FACC15';
+    ctx.strokeStyle = outline;
+    ctx.lineWidth = 2;
+    for (const tx of [-9, 9]) {
+      ctx.beginPath();
+      ctx.roundRect(tx - 4.5, 18, 9, 6, 3);
+      ctx.fill();
+      ctx.stroke();
+    }
+
+    // Arcane golden chest talisman
+    ctx.fillStyle = '#FACC15';
+    ctx.beginPath();
+    ctx.arc(0, -5, 5.2, 0, Math.PI * 2);
+    ctx.fill();
+    ctx.stroke();
+    ctx.fillStyle = '#00D4FF';
+    ctx.beginPath();
+    ctx.arc(0, -5, 2.4, 0, Math.PI * 2);
+    ctx.fill();
+
+    // Regal horned ear tufts
+    ctx.fillStyle = '#7C3AED';
+    ctx.strokeStyle = outline;
+    ctx.lineWidth = 2.4;
+    ctx.beginPath();
+    ctx.moveTo(-12, -28);
+    ctx.lineTo(-22, -44);
+    ctx.lineTo(-4, -34);
+    ctx.closePath();
+    ctx.fill();
+    ctx.stroke();
+
+    ctx.beginPath();
+    ctx.moveTo(12, -28);
+    ctx.lineTo(22, -44);
+    ctx.lineTo(4, -34);
+    ctx.closePath();
+    ctx.fill();
+    ctx.stroke();
+
+    // Round wise owl head
+    ctx.fillStyle = '#7E22CE';
+    ctx.beginPath();
+    ctx.ellipse(0, -22, 18.5, 15.5, 0, 0, Math.PI * 2);
+    ctx.fill();
+    ctx.stroke();
+
+    // Facial disc rings
+    ctx.fillStyle = '#DDD6FE';
+    ctx.beginPath();
+    ctx.arc(-7.5, -22, 7.5, 0, Math.PI * 2);
+    ctx.arc(7.5, -22, 7.5, 0, Math.PI * 2);
+    ctx.fill();
+
+    // Luminous golden-amber arcane eyes
+    ctx.fillStyle = '#FACC15';
+    ctx.strokeStyle = outline;
+    ctx.lineWidth = 1.8;
+    ctx.beginPath();
+    ctx.arc(-7.5, -22, 5.2, 0, Math.PI * 2);
+    ctx.arc(7.5, -22, 5.2, 0, Math.PI * 2);
+    ctx.fill();
+    ctx.stroke();
+
+    ctx.fillStyle = '#020617';
+    ctx.beginPath();
+    ctx.arc(-7.5, -22, 2.3, 0, Math.PI * 2);
+    ctx.arc(7.5, -22, 2.3, 0, Math.PI * 2);
+    ctx.fill();
+    ctx.fillStyle = '#FFFFFF';
+    ctx.beginPath();
+    ctx.arc(-8.8, -23.5, 1.3, 0, Math.PI * 2);
+    ctx.arc(6.2, -23.5, 1.3, 0, Math.PI * 2);
+    ctx.fill();
+
+    // Golden beak
+    ctx.fillStyle = '#F59E0B';
+    ctx.beginPath();
+    ctx.moveTo(-4, -18);
+    ctx.lineTo(4, -18);
+    ctx.lineTo(0, -11.5);
+    ctx.closePath();
+    ctx.fill();
+    ctx.stroke();
+  }
+
+  private drawCatPetBody(ctx: CanvasRenderingContext2D, t: number) {
+    const outline = '#020617';
+    const tailSway = Math.sin(t * 3.1) * 6;
+
+    // Mystical twin-glint curving lucky tail
+    ctx.strokeStyle = '#3B0764';
+    ctx.lineWidth = 7;
+    ctx.lineCap = 'round';
+    ctx.beginPath();
+    ctx.moveTo(14, 18);
+    ctx.bezierCurveTo(36, 16, 38, -10 + tailSway, 24, -22 + tailSway);
+    ctx.stroke();
+    ctx.strokeStyle = '#FACC15';
+    ctx.lineWidth = 2.2;
+    ctx.stroke();
+
+    // Glowing golden luck star at tail tip
+    this.drawCharmStar(ctx, 24, -22 + tailSway, 5.8, '#FEF08A');
+
+    // Sleek twilight-obsidian guardian cat body
+    const bodyGrad = ctx.createLinearGradient(0, -12, 0, 26);
+    bodyGrad.addColorStop(0, '#4C1D95');
+    bodyGrad.addColorStop(0.55, '#1E1B4B');
+    bodyGrad.addColorStop(1, '#0F172A');
+    ctx.fillStyle = bodyGrad;
+    ctx.strokeStyle = outline;
+    ctx.lineWidth = 2.6;
+    ctx.beginPath();
+    ctx.ellipse(0, 9, 18, 20, 0, 0, Math.PI * 2);
+    ctx.fill();
+    ctx.stroke();
+
+    // Elegant paws (one slightly raised like a mystical lucky charm cat!)
+    ctx.fillStyle = '#312E81';
+    ctx.beginPath();
+    ctx.ellipse(-9, 23, 6, 4.5, 0, 0, Math.PI * 2);
+    ctx.fill();
+    ctx.stroke();
+
+    // Raised lucky-charm paw with golden glow glint
+    ctx.fillStyle = '#4C1D95';
+    ctx.beginPath();
+    ctx.ellipse(11, 2 + Math.sin(t * 3.5) * 1.6, 5.8, 8.5, -0.35, 0, Math.PI * 2);
+    ctx.fill();
+    ctx.stroke();
+
+    // Radiant Gold Lucky Collar & Fortune Bell Amulet
+    ctx.strokeStyle = '#DC2626';
+    ctx.lineWidth = 4.2;
+    ctx.beginPath();
+    ctx.arc(0, -5, 13.5, 0.35, Math.PI - 0.35);
+    ctx.stroke();
+
+    ctx.fillStyle = '#FACC15';
+    ctx.strokeStyle = '#422006';
+    ctx.lineWidth = 2;
+    ctx.beginPath();
+    ctx.arc(0, 8, 6.2, 0, Math.PI * 2);
+    ctx.fill();
+    ctx.stroke();
+    ctx.fillStyle = '#FEF08A';
+    ctx.beginPath();
+    ctx.arc(-1.8, 6.2, 2, 0, Math.PI * 2);
+    ctx.fill();
+
+    // Pointed mystical cat ears with golden inner rune glow
+    ctx.fillStyle = '#2E1065';
+    ctx.strokeStyle = outline;
+    ctx.lineWidth = 2.5;
+    for (const dir of [-1, 1]) {
+      ctx.beginPath();
+      ctx.moveTo(dir * 5, -31);
+      ctx.lineTo(dir * 18, -45);
+      ctx.lineTo(dir * 16, -24);
+      ctx.closePath();
+      ctx.fill();
+      ctx.stroke();
+
+      ctx.fillStyle = '#FACC15';
+      ctx.beginPath();
+      ctx.moveTo(dir * 8, -30);
+      ctx.lineTo(dir * 15, -39);
+      ctx.lineTo(dir * 14, -27);
+      ctx.closePath();
+      ctx.fill();
+      ctx.fillStyle = '#2E1065';
+    }
+
+    // Sleek mystic head
+    const headGrad = ctx.createRadialGradient(-3, -23, 3, 0, -20, 19);
+    headGrad.addColorStop(0, '#5B21B6');
+    headGrad.addColorStop(0.6, '#2E1065');
+    headGrad.addColorStop(1, '#0F172A');
+    ctx.fillStyle = headGrad;
+    ctx.beginPath();
+    ctx.ellipse(0, -20, 17.5, 14.5, 0, 0, Math.PI * 2);
+    ctx.fill();
+    ctx.stroke();
+
+    // Forehead golden fortune star rune
+    this.drawCharmStar(ctx, 0, -28.5, 4.4, '#FACC15');
+
+    // Luminous emerald-gold fortune eyes
+    ctx.fillStyle = '#FDE047';
+    ctx.beginPath();
+    ctx.ellipse(-7, -19.5, 4.3, 3.4, 0.14, 0, Math.PI * 2);
+    ctx.ellipse(7, -19.5, 4.3, 3.4, -0.14, 0, Math.PI * 2);
+    ctx.fill();
+    ctx.fillStyle = '#020617';
+    ctx.beginPath();
+    ctx.ellipse(-7, -19.5, 1.3, 3, 0, 0, Math.PI * 2);
+    ctx.ellipse(7, -19.5, 1.3, 3, 0, 0, Math.PI * 2);
+    ctx.fill();
+
+    // Subtle golden whiskers
+    ctx.strokeStyle = 'rgba(250, 204, 21, 0.72)';
+    ctx.lineWidth = 1.4;
+    for (const dir of [-1, 1]) {
+      ctx.beginPath();
+      ctx.moveTo(dir * 11, -16);
+      ctx.lineTo(dir * 22, -18);
+      ctx.moveTo(dir * 11, -13);
+      ctx.lineTo(dir * 21, -12);
+      ctx.stroke();
+    }
+
+    // Cute golden nose
+    ctx.fillStyle = '#FACC15';
+    ctx.beginPath();
+    ctx.moveTo(-2.5, -15);
+    ctx.lineTo(2.5, -15);
+    ctx.lineTo(0, -12.5);
+    ctx.closePath();
+    ctx.fill();
   }
 
   private drawHordeWarningArrow(

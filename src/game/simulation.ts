@@ -15,6 +15,7 @@ import {
   buildArenaSlots,
   canMergeUnits,
   circlesCollide,
+  computeCastlePetPosition,
   computeEnemyEssenceReward,
   computeRadialKnockbackVector,
   computeRouteSpawnPoint,
@@ -30,6 +31,7 @@ import {
   getHeroXpBounds,
   getStageConfig,
   getStageRouteDefinition,
+  getUnitStatsForLevel,
   isEliteEnemy,
   isValidFreeHeroPosition,
   pushEnemyBackAlongRoute,
@@ -38,6 +40,7 @@ import {
 } from './engineMath';
 import { createDefaultHeroRoster, loadProgress, saveProgress } from './storage';
 import {
+  ACHIEVEMENT_CATALOG,
   ArenaConfig,
   ArenaSlot,
   DEFAULT_ARENA,
@@ -46,7 +49,9 @@ import {
   EnemyEntity,
   EnemyKind,
   ExplosionEffect,
+  FX_STYLES,
   FloatingText,
+  FxStyleId,
   GamePhase,
   HERO_SPECS,
   HERO_UPGRADE_CATALOG,
@@ -59,11 +64,18 @@ import {
   HordeWarningIndicator,
   HudSnapshot,
   MAX_HERO_LEVEL,
+  PET_ORDER,
+  PET_SPECS,
+  PactOption,
   Particle,
   ParticleKind,
+  PetKind,
+  PetSpec,
   ProjectileEntity,
+  RING_SKINS,
   RewardBanner,
   RewardTone,
+  RingSkinId,
   SPELL_SPECS,
   ShockwaveRingEffect,
   SlashEffect,
@@ -74,7 +86,6 @@ import {
   UNIT_SPECS,
   UnitEntity,
   UnitKind,
-  PactOption,
 } from './types';
 
 const PARTICLE_POOL_SIZE = 340;
@@ -232,21 +243,44 @@ export class GameSimulation {
     this.bestScore = saved.bestScore;
     this.selectedHeroClass = saved.selectedHeroClass;
     this.evolutionPoints = saved.evolutionPoints;
-    this.emberSouls = saved.emberSouls ?? 10;
+    this.emberSouls = saved.emberSouls ?? 15;
     this.talents = saved.talents ?? { critMastery: 0, manaRegen: 0, ringReach: 0, towerDiscount: 0 };
     this.heroRoster = saved.heroes;
     this.convergenceStages = saved.convergenceStages;
+    this.selectedPet = saved.selectedPet ?? 'turtle';
+    this.enemyKillsByCatalogId = saved.enemyKillsByCatalogId ?? {};
+    this.discoveredEnemyIds = saved.discoveredEnemyIds ?? [1];
+    this.unlockedAchievements = saved.unlockedAchievements ?? [];
+    this.achievementProgress = saved.achievementProgress ?? {};
+    this.unlockedCosmetics = saved.unlockedCosmetics ?? ['ring:classic', 'fx:standard'];
+    this.equippedRingSkin = saved.equippedRingSkin ?? 'classic';
+    this.equippedFxStyle = saved.equippedFxStyle ?? 'standard';
+    this.totalLifetimeKills = saved.totalLifetimeKills ?? 0;
     this.heroes = [this.createHeroFromRoster(this.selectedHeroClass, 's1-5', 545, 295)];
     this.resetWorld('title', 1, this.selectedHeroClass);
   }
 
-  public emberSouls = 10;
+  public emberSouls = 15;
   public talents: Record<string, number> = {
     critMastery: 0,
     manaRegen: 0,
     ringReach: 0,
     towerDiscount: 0,
   };
+  public selectedPet: PetKind = 'turtle';
+  public petSwitchFlash = 0;
+  private petRegenAccum = 0;
+  private petCastleHpBonusApplied = 0;
+
+  public enemyKillsByCatalogId: Record<number, number> = {};
+  public discoveredEnemyIds: number[] = [1];
+  public unlockedAchievements: string[] = [];
+  public achievementProgress: Record<string, number> = {};
+  public unlockedCosmetics: string[] = ['ring:classic', 'fx:standard'];
+  public equippedRingSkin: RingSkinId = 'classic';
+  public equippedFxStyle: FxStyleId = 'standard';
+  public totalLifetimeKills = 0;
+
   public pendingPactChoices: PactOption[] | null = null;
   public activePacts: string[] = [];
   public ringRotation = 0;
@@ -257,6 +291,128 @@ export class GameSimulation {
 
   public get hero(): HeroEntity {
     return this.heroes[this.activeHeroIndex] ?? this.heroes[0];
+  }
+
+  public getActivePetSpec(): PetSpec {
+    return PET_SPECS[this.selectedPet];
+  }
+
+  public getItemDropLuckBonus(): number {
+    return PET_SPECS[this.selectedPet].itemDropLuckBonusPct;
+  }
+
+  public setSelectedPet(pet: PetKind): boolean {
+    if (!PET_ORDER.includes(pet)) return false;
+    const prevPet = this.selectedPet;
+    this.selectedPet = pet;
+    const nextSpec = PET_SPECS[pet];
+
+    // Recalculate Castle Max HP cleanly when switching to/from Turtle without heal exploits
+    const baseWithoutPet = Math.max(1, this.baseMaxHp - this.petCastleHpBonusApplied);
+    const nextBonus = Math.round(baseWithoutPet * nextSpec.castleHpBonusPct);
+    const hpRatio = this.baseMaxHp > 0 ? this.baseHp / this.baseMaxHp : 1;
+    this.petCastleHpBonusApplied = nextBonus;
+    this.baseMaxHp = baseWithoutPet + nextBonus;
+    this.baseHp = Math.max(1, Math.min(this.baseMaxHp, Math.round(this.baseMaxHp * hpRatio)));
+    this.petRegenAccum = 0;
+
+    // Immediately recompute Hero(es) and all active Allied Units for Tiger / Rabbit passives
+    for (const h of this.heroes) {
+      this.applySavedStatsToHero(h);
+    }
+    for (const u of this.units) {
+      this.recomputeUnitStats(u);
+    }
+
+    if (prevPet !== pet) {
+      this.petSwitchFlash = 1;
+      const petPos = computeCastlePetPosition(this.arena);
+      this.spawnTypedParticles(petPos.x, petPos.y - 12, 18, 'spark', nextSpec.primaryColor, 145, 0.55);
+      this.spawnTypedParticles(petPos.x, petPos.y - 12, 12, 'spark', nextSpec.accentColor, 110, 0.5);
+      if (this.phase === 'playing') {
+        this.floatingTexts.push({
+          x: petPos.x,
+          y: petPos.y - 54,
+          vy: -24,
+          text: `${nextSpec.name}: ${nextSpec.shortBonus}`,
+          color: nextSpec.accentColor,
+          scale: 0.96,
+          life: 1.3,
+          maxLife: 1.3,
+        });
+      }
+      soundEngine.playClick();
+    }
+
+    this.persistProgress();
+    return true;
+  }
+
+  public buyOrEquipRingSkin(skinId: RingSkinId): boolean {
+    const skin = RING_SKINS[skinId];
+    if (!skin) return false;
+    const key = `ring:${skinId}`;
+    if (!this.unlockedCosmetics.includes(key)) {
+      if (this.emberSouls < skin.cost) return false;
+      this.emberSouls -= skin.cost;
+      this.unlockedCosmetics.push(key);
+    }
+    this.equippedRingSkin = skinId;
+    soundEngine.playClick();
+    this.persistProgress();
+    return true;
+  }
+
+  public buyOrEquipFxStyle(fxId: FxStyleId): boolean {
+    const fx = FX_STYLES[fxId];
+    if (!fx) return false;
+    const key = `fx:${fxId}`;
+    if (!this.unlockedCosmetics.includes(key)) {
+      if (this.emberSouls < fx.cost) return false;
+      this.emberSouls -= fx.cost;
+      this.unlockedCosmetics.push(key);
+    }
+    this.equippedFxStyle = fxId;
+    soundEngine.playClick();
+    this.persistProgress();
+    return true;
+  }
+
+  private evaluateAchievements() {
+    const maxHeroLevel = Math.max(
+      this.heroRoster.archer.level,
+      this.heroRoster.swordsman.level,
+      this.heroRoster.bomber.level,
+      ...this.heroes.map((h) => h.level)
+    );
+    const values: Record<string, number> = {
+      first_blood: this.totalLifetimeKills,
+      slayer_250: this.totalLifetimeKills,
+      first_merge: Math.max(this.achievementProgress.first_merge ?? 0, this.mergesPerformed),
+      stage_5: this.highestUnlockedStage,
+      stage_15: this.highestUnlockedStage,
+      hero_lv10: maxHeroLevel,
+    };
+
+    for (const ach of ACHIEVEMENT_CATALOG) {
+      const val = values[ach.id] ?? 0;
+      this.achievementProgress[ach.id] = Math.max(this.achievementProgress[ach.id] ?? 0, val);
+      if (
+        !this.unlockedAchievements.includes(ach.id) &&
+        this.achievementProgress[ach.id] >= ach.target
+      ) {
+        this.unlockedAchievements.push(ach.id);
+        this.emberSouls += ach.rewardSouls;
+        if (this.phase === 'playing') {
+          this.triggerRewardBanner(
+            `CONQUISTA: ${ach.title.toUpperCase()}`,
+            `+${ach.rewardSouls} Almas de Brasa`,
+            'gold',
+            1.5
+          );
+        }
+      }
+    }
   }
 
   private persistProgress() {
@@ -277,6 +433,15 @@ export class GameSimulation {
       talents: this.talents,
       heroes: this.heroRoster,
       convergenceStages: this.convergenceStages,
+      enemyKillsByCatalogId: this.enemyKillsByCatalogId,
+      discoveredEnemyIds: this.discoveredEnemyIds,
+      unlockedAchievements: this.unlockedAchievements,
+      achievementProgress: this.achievementProgress,
+      unlockedCosmetics: this.unlockedCosmetics,
+      equippedRingSkin: this.equippedRingSkin,
+      equippedFxStyle: this.equippedFxStyle,
+      totalLifetimeKills: this.totalLifetimeKills,
+      selectedPet: this.selectedPet,
     });
   }
 
@@ -313,29 +478,30 @@ export class GameSimulation {
     return true;
   }
 
-  private getEffectiveUnitCost(kind: UnitKind): number {
+  public getEffectiveUnitCost(kind: UnitKind): number {
     const baseCost = UNIT_SPECS[kind].cost;
     const discountLvl = this.talents.towerDiscount ?? 0;
     const talentMult = Math.max(0.75, 1 - discountLvl * 0.04);
     const ironMult = this.activePacts.includes('iron') ? 1.15 : 1;
-    return Math.max(10, Math.round(baseCost * talentMult * ironMult));
+    const petCostMult = 1 - PET_SPECS[this.selectedPet].manaCostReductionPct;
+    return Math.max(10, Math.round(baseCost * talentMult * ironMult * petCostMult));
   }
 
-  private getSpellCooldownMultiplier(): number {
+  public getSpellCooldownMultiplier(): number {
     const manaLvl = this.talents.manaRegen ?? 0;
     const talentMult = Math.max(0.6, 1 - manaLvl * 0.07);
     const voidMult = this.activePacts.includes('void') ? 0.6 : 1;
-    return talentMult * voidMult;
+    const petCdMult = 1 - PET_SPECS[this.selectedPet].spellCooldownReductionPct;
+    return talentMult * voidMult * petCdMult;
   }
 
   private recomputeUnitStats(unit: UnitEntity) {
-    const spec = UNIT_SPECS[unit.kind];
-    const levelDelta = Math.max(0, unit.level - 1);
-    const baseDmg = spec.damage * Math.pow(1.95, levelDelta);
-    const baseMaxHp = spec.maxHp * Math.pow(1.75, levelDelta);
-    const baseCd = Math.max(0.24, spec.cooldown * Math.pow(0.84, levelDelta));
-    const baseRange = spec.range * (1 + levelDelta * 0.1);
-    const baseCrit = Math.min(0.65, spec.critChance + levelDelta * 0.05);
+    const scaled = getUnitStatsForLevel(unit.kind, unit.level);
+    const baseDmg = scaled.damage;
+    const baseMaxHp = scaled.maxHp;
+    const baseCd = scaled.cooldown;
+    const baseRange = scaled.range;
+    const baseCrit = scaled.critChance;
 
     const bloodMult = this.activePacts.includes('blood') ? 1.4 : 1;
     const voidMult = this.activePacts.includes('void') ? 0.85 : 1;
@@ -344,11 +510,15 @@ export class GameSimulation {
     const reachBonus = 1 + (this.talents.ringReach ?? 0) * 0.05;
     const critBonus = (this.talents.critMastery ?? 0) * 0.03;
 
+    const petSpec = PET_SPECS[this.selectedPet];
+    const petDmgMult = 1 + petSpec.damageBonusPct;
+    const petCdMult = 1 / (1 + petSpec.attackSpeedBonusPct);
+
     const prevMaxHp = unit.maxHp || baseMaxHp;
     unit.maxHp = Math.round(baseMaxHp);
     unit.hp = Math.min(unit.maxHp, Math.max(1, Math.round((unit.hp / prevMaxHp) * unit.maxHp)));
-    unit.damage = Math.max(1, Math.round(baseDmg * this.unitUpgradeDamageMult * bloodMult * voidMult));
-    unit.cooldown = Math.max(0.18, Number((baseCd * windCdMult).toFixed(3)));
+    unit.damage = Math.max(1, Math.round(baseDmg * this.unitUpgradeDamageMult * bloodMult * voidMult * petDmgMult));
+    unit.cooldown = Math.max(0.16, Number((baseCd * windCdMult * petCdMult).toFixed(3)));
     unit.range = Math.round(baseRange * reachBonus * windRangeMult);
     unit.critChance = Math.min(0.8, baseCrit + critBonus);
   }
@@ -432,27 +602,34 @@ export class GameSimulation {
 
   private applySavedStatsToHero(hero: HeroEntity) {
     const base = getHeroStatsForLevel(hero.heroClass, hero.level);
-    let dmgMult = 1;
-    let cdMult = 1;
-    let rangeMult = 1 + (this.talents.ringReach ?? 0) * 0.04;
+    let dmgBonus = 0;
+    let hasteBonus = 0;
+    let rangeBonus = (this.talents.ringReach ?? 0) * 0.04;
     let critBonus = (this.talents.critMastery ?? 0) * 0.025;
-    let blastMult = 1;
+    let blastBonus = 0;
 
+    // 50% slower strictly linear additive milestone upgrades
     for (const upg of hero.upgradeChoices ?? []) {
       if (upg === 'power') {
-        dmgMult *= 1.14;
-        critBonus += 0.03;
+        dmgBonus += 0.07;
+        critBonus += 0.015;
       } else if (upg === 'haste') {
-        cdMult *= 0.88;
-        rangeMult *= 1.06;
+        hasteBonus += 0.06;
+        rangeBonus += 0.03;
       } else if (upg === 'area') {
-        blastMult *= 1.16;
-        dmgMult *= 1.1;
+        blastBonus += 0.08;
+        dmgBonus += 0.05;
       }
     }
 
+    const petSpec = PET_SPECS[this.selectedPet];
+    const dmgMult = (1 + dmgBonus) * (1 + petSpec.damageBonusPct);
+    const cdMult = (1 / (1 + hasteBonus)) * (1 / (1 + petSpec.attackSpeedBonusPct));
+    const rangeMult = 1 + rangeBonus;
+    const blastMult = 1 + blastBonus;
+
     hero.damage = Math.max(1, Math.round(base.damage * dmgMult));
-    hero.cooldown = Math.max(0.2, Number((base.cooldown * cdMult).toFixed(3)));
+    hero.cooldown = Math.max(0.18, Number((base.cooldown * cdMult).toFixed(3)));
     hero.range = Math.round(base.range * rangeMult);
     hero.critChance = Math.min(0.6, base.critChance + critBonus);
     hero.blastRadius = base.blastRadius > 0 ? Math.round(base.blastRadius * blastMult) : 0;
@@ -565,7 +742,7 @@ export class GameSimulation {
     if (upgradeId === 'fortress' && this.phase === 'playing') {
       this.baseMaxHp += 20;
       this.baseHp = Math.min(this.baseMaxHp, this.baseHp + 25);
-      this.unitUpgradeDamageMult *= 1.22;
+      this.unitUpgradeDamageMult += 0.11;
       for (const unit of this.units) {
         this.recomputeUnitStats(unit);
       }
@@ -747,9 +924,17 @@ export class GameSimulation {
     if (this.currentStage % 5 === 0) {
       this.baseMaxHp += 20;
       this.baseHp = this.baseMaxHp;
-      this.unitUpgradeDamageMult *= 1.12;
+      this.unitUpgradeDamageMult += 0.06;
       this.heroUpgradesCount += 1;
     }
+
+    // Apply Passive Guardian Pet Castle Vitality bonus (e.g., Turtle +35% Max HP)
+    const petSpec = PET_SPECS[this.selectedPet];
+    this.petCastleHpBonusApplied = Math.round(this.baseMaxHp * petSpec.castleHpBonusPct);
+    this.baseMaxHp += this.petCastleHpBonusApplied;
+    this.baseHp = this.baseMaxHp;
+    this.petRegenAccum = 0;
+    this.petSwitchFlash = 0;
 
     this.startWave(1);
 
@@ -1785,6 +1970,7 @@ export class GameSimulation {
 
     this.cameraTrauma = Math.max(0, this.cameraTrauma - dt * 1.9);
     this.baseHitFlash = Math.max(0, this.baseHitFlash - dt);
+    this.petSwitchFlash = Math.max(0, this.petSwitchFlash - dt * 2.2);
 
     if (this.phase === 'title') {
       const activeBranches = this.arena.routes.filter((r) => r.unlockRouteLevel <= this.routeLevel);
@@ -1824,6 +2010,26 @@ export class GameSimulation {
 
     this.survivalSeconds += dt;
     this.ringHeat = Math.max(0, this.ringHeat - dt * 0.12);
+
+    // Passive Pet Guardian Castle Regeneration (e.g., Tartaruga +2 HP/s)
+    const activePetSpec = PET_SPECS[this.selectedPet];
+    if (activePetSpec.castleRegenPerSec > 0 && this.baseHp > 0 && this.baseHp < this.baseMaxHp) {
+      this.petRegenAccum += dt * activePetSpec.castleRegenPerSec;
+      if (this.petRegenAccum + 1e-9 >= 1) {
+        const healAmt = Math.floor(this.petRegenAccum + 1e-9);
+        this.petRegenAccum = Math.max(0, this.petRegenAccum - healAmt);
+        this.baseHp = Math.min(this.baseMaxHp, this.baseHp + healAmt);
+        this.spawnTypedParticles(
+          this.arena.castleX + (Math.random() - 0.5) * 34,
+          this.arena.castleY - 14,
+          3,
+          'spark',
+          '#6EE7B7',
+          58,
+          0.45
+        );
+      }
+    }
 
     if (this.activePacts.includes('blood')) {
       this.bloodPactDrainAccum += dt * 0.8;
@@ -2785,6 +2991,14 @@ export class GameSimulation {
 
     if (res.killed) {
       this.kills += 1;
+      this.totalLifetimeKills += 1;
+      if (enemy.catalogId !== undefined) {
+        this.enemyKillsByCatalogId[enemy.catalogId] =
+          (this.enemyKillsByCatalogId[enemy.catalogId] ?? 0) + 1;
+        if (!this.discoveredEnemyIds.includes(enemy.catalogId)) {
+          this.discoveredEnemyIds.push(enemy.catalogId);
+        }
+      }
 
       const gainedEssence = computeEnemyEssenceReward(
         enemy.kind,
@@ -2889,6 +3103,7 @@ export class GameSimulation {
         }
       }
 
+      this.evaluateAchievements();
       this.persistProgress();
 
       const burstScale = isBoss ? 2 : isElite ? 1.5 : 1;
@@ -3070,6 +3285,16 @@ export class GameSimulation {
       activePacts: [...this.activePacts],
       ringRotation: this.ringRotation,
       ringHeat: this.ringHeat,
+      selectedPet: this.selectedPet,
+      petDropLuckBonus: this.getItemDropLuckBonus(),
+      enemyKillsByCatalogId: { ...this.enemyKillsByCatalogId },
+      discoveredEnemyIds: [...this.discoveredEnemyIds],
+      unlockedAchievements: [...this.unlockedAchievements],
+      achievementProgress: { ...this.achievementProgress },
+      unlockedCosmetics: [...this.unlockedCosmetics],
+      equippedRingSkin: this.equippedRingSkin,
+      equippedFxStyle: this.equippedFxStyle,
+      totalLifetimeKills: this.totalLifetimeKills,
     };
   }
 }

@@ -6,6 +6,8 @@ import {
   HeroSaveData,
   HeroUpgradeId,
   MAX_HERO_LEVEL,
+  PET_ORDER,
+  PetKind,
   RING_SKINS,
   RingSkinId,
   TOTAL_STAGES,
@@ -31,9 +33,11 @@ export interface SavedProgress {
   equippedRingSkin: RingSkinId;
   equippedFxStyle: FxStyleId;
   totalLifetimeKills: number;
+  selectedPet: PetKind;
 }
 
 const VALID_HEROES: HeroClass[] = ['archer', 'swordsman', 'bomber'];
+const VALID_PETS: ReadonlyArray<PetKind> = PET_ORDER;
 const VALID_UPGRADES: HeroUpgradeId[] = ['power', 'haste', 'fortress', 'area'];
 const VALID_RING_SKINS = Object.keys(RING_SKINS) as RingSkinId[];
 const VALID_FX_STYLES = Object.keys(FX_STYLES) as FxStyleId[];
@@ -163,6 +167,7 @@ export function createDefaultProgress(seed?: number): SavedProgress {
     equippedRingSkin: 'classic',
     equippedFxStyle: 'standard',
     totalLifetimeKills: 0,
+    selectedPet: 'turtle',
   };
 }
 
@@ -249,6 +254,9 @@ export function loadProgress(): SavedProgress {
       ? (parsed.equippedFxStyle as FxStyleId)
       : 'standard';
     const totalLifetimeKills = Math.max(0, Math.floor(Number(parsed.totalLifetimeKills) || 0));
+    const selectedPet: PetKind = VALID_PETS.includes(parsed.selectedPet as PetKind)
+      ? (parsed.selectedPet as PetKind)
+      : 'turtle';
 
     return {
       highestUnlockedStage: stage,
@@ -267,6 +275,7 @@ export function loadProgress(): SavedProgress {
       equippedRingSkin,
       equippedFxStyle,
       totalLifetimeKills,
+      selectedPet,
     };
   } catch {
     return createDefaultProgress(7319);
@@ -315,6 +324,7 @@ export function saveProgress(progress: SavedProgress): void {
           ? progress.equippedFxStyle
           : 'standard',
         totalLifetimeKills: Math.max(0, Math.floor(progress.totalLifetimeKills || 0)),
+        selectedPet: VALID_PETS.includes(progress.selectedPet) ? progress.selectedPet : 'turtle',
       })
     );
   } catch {

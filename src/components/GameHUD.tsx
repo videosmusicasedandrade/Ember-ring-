@@ -1,11 +1,29 @@
 import React, { useEffect, useState } from 'react';
-import { Crosshair, Move, Music, Pause, Plus, RotateCcw, Shield, Sparkles, Swords, Volume2, VolumeX, Zap } from 'lucide-react';
+import {
+  ChevronDown,
+  ChevronUp,
+  Crosshair,
+  Move,
+  Music,
+  Pause,
+  Plus,
+  RotateCcw,
+  Shield,
+  Sparkles,
+  Swords,
+  Volume2,
+  VolumeX,
+  Zap,
+} from 'lucide-react';
 import { soundEngine } from '../game/audio';
 import { ALLY_ALBUM, getUnlockedAlliesForStage } from '../game/bestiaryData';
 import {
   HERO_SPECS,
   HudSnapshot,
   MAX_HERO_LEVEL,
+  PET_ORDER,
+  PET_SPECS,
+  PetKind,
   SPELL_SPECS,
   SpellKind,
   UNIT_SPECS,
@@ -13,6 +31,7 @@ import {
 } from '../game/types';
 import { AllyPortraitSvg } from './AlbumArtwork';
 import { HeroClassIcon } from './GameModals';
+import { PetPortraitSvg } from './PetArtwork';
 
 interface GameHUDProps {
   hud: HudSnapshot;
@@ -21,6 +40,7 @@ interface GameHUDProps {
   onStartCardDrag: (kind: UnitKind, clientX: number, clientY: number) => void;
   onToggleHeroReposition: () => void;
   onSelectActiveHero: (index: number) => void;
+  onSelectPet: (pet: PetKind) => void;
   onActivateSpell: (kind: SpellKind) => void;
   onTogglePause: () => void;
   onToggleMuteMusic: () => void;
@@ -77,6 +97,7 @@ export const GameHUD: React.FC<GameHUDProps> = ({
   onStartCardDrag,
   onToggleHeroReposition,
   onSelectActiveHero,
+  onSelectPet,
   onActivateSpell,
   onTogglePause,
   onToggleMuteMusic,
@@ -86,6 +107,7 @@ export const GameHUD: React.FC<GameHUDProps> = ({
 }) => {
   const [ghostHp, setGhostHp] = useState(hud.baseHp);
   const [hoveredUnitKind, setHoveredUnitKind] = useState<UnitKind | null>(null);
+  const [petPickerOpen, setPetPickerOpen] = useState(false);
 
   useEffect(() => {
     if (hud.baseHp < ghostHp) {
@@ -447,6 +469,124 @@ export const GameHUD: React.FC<GameHUDProps> = ({
         </div>
       )}
 
+      {/* Compact Passive Castle Guardian Pet HUD Widget (Top-Left below Castle/Hero Bar) */}
+      {(() => {
+        const activePet = PET_SPECS[hud.selectedPet];
+        return (
+          <div
+            className="pointer-events-auto fixed left-2.5 top-[156px] z-20 flex flex-col items-start gap-1.5 sm:left-4 sm:top-[82px]"
+            aria-label="Pet Guardião do Castelo"
+          >
+            <button
+              type="button"
+              tabIndex={-1}
+              data-testid="hud-pet-toggle"
+              aria-expanded={petPickerOpen}
+              onClick={(e) => {
+                e.currentTarget.blur();
+                soundEngine.playClick();
+                setPetPickerOpen((prev) => !prev);
+              }}
+              className="flex items-center gap-2 rounded-2xl border-2 bg-[#0F172A]/95 px-2.5 py-1.5 text-left shadow-[0_4px_0_rgba(2,6,23,0.8)] transition-transform active:translate-y-0.5 hover:bg-[#162033]"
+              style={{
+                borderColor: activePet.primaryColor,
+                boxShadow: `0 4px 0 rgba(2,6,23,0.8), 0 0 14px ${activePet.glowColor}`,
+              }}
+              title={`${activePet.title}: ${activePet.description} (Clique para trocar de pet)`}
+            >
+              <div
+                className="flex h-8 w-8 shrink-0 items-center justify-center rounded-xl border border-white/10 bg-[#050A14]"
+                style={{ boxShadow: `inset 0 0 10px ${activePet.glowColor}` }}
+              >
+                <PetPortraitSvg pet={hud.selectedPet} className="h-7 w-7" />
+              </div>
+              <div className="leading-tight">
+                <div className="flex items-center gap-1 whitespace-nowrap text-[11px] font-bold text-white">
+                  <span>{activePet.name}</span>
+                  <span className="text-[9px] font-semibold uppercase tracking-wide text-[#94A3B8]">
+                    Pet
+                  </span>
+                </div>
+                <div
+                  className="font-mono-tabular whitespace-nowrap text-[10px] font-bold"
+                  style={{ color: activePet.primaryColor }}
+                  data-testid="hud-pet-bonus"
+                >
+                  {activePet.shortBonus}
+                </div>
+              </div>
+              <span className="ml-0.5 text-[#94A3B8]">
+                {petPickerOpen ? <ChevronUp className="h-3.5 w-3.5" /> : <ChevronDown className="h-3.5 w-3.5" />}
+              </span>
+            </button>
+
+            {petPickerOpen && (
+              <div
+                data-testid="hud-pet-picker"
+                className="flex w-[256px] flex-col gap-1 rounded-2xl border-2 border-[#334155] bg-[#0A1124]/96 p-2 shadow-[0_12px_28px_rgba(0,0,0,0.85)] backdrop-blur-md"
+              >
+                <div className="flex items-center justify-between px-1 pb-1 text-[10px] font-bold uppercase tracking-wider text-[#94A3B8]">
+                  <span>Trocar Guardião Passivo</span>
+                  <span className="text-[#FACC15]">Ao Vivo</span>
+                </div>
+                {PET_ORDER.map((petKind) => {
+                  const spec = PET_SPECS[petKind];
+                  const isActive = hud.selectedPet === petKind;
+                  return (
+                    <button
+                      key={petKind}
+                      type="button"
+                      tabIndex={-1}
+                      data-testid={`hud-pet-option-${petKind}`}
+                      aria-pressed={isActive}
+                      onClick={(e) => {
+                        e.currentTarget.blur();
+                        soundEngine.playClick();
+                        onSelectPet(petKind);
+                        setPetPickerOpen(false);
+                      }}
+                      className={`flex items-center gap-2 rounded-xl border px-2 py-1.5 text-left transition-colors ${
+                        isActive
+                          ? 'bg-[#162033]'
+                          : 'border-[#1E293B] bg-[#080D1A]/90 hover:border-[#475569] hover:bg-[#111B2E]'
+                      }`}
+                      style={
+                        isActive
+                          ? {
+                              borderColor: spec.primaryColor,
+                              boxShadow: `0 0 12px ${spec.glowColor}`,
+                            }
+                          : undefined
+                      }
+                    >
+                      <div className="flex h-8 w-8 shrink-0 items-center justify-center rounded-lg border border-white/10 bg-[#050A14]">
+                        <PetPortraitSvg pet={petKind} className="h-7 w-7" />
+                      </div>
+                      <div className="min-w-0 flex-1 leading-tight">
+                        <div className="flex items-center justify-between gap-1">
+                          <span className="font-display text-xs font-bold text-white">
+                            {spec.name}
+                          </span>
+                          <span
+                            className="font-mono-tabular text-[10px] font-bold"
+                            style={{ color: spec.primaryColor }}
+                          >
+                            {spec.shortBonus}
+                          </span>
+                        </div>
+                        <div className="truncate text-[10px] text-[#94A3B8]">
+                          {spec.description}
+                        </div>
+                      </div>
+                    </button>
+                  );
+                })}
+              </div>
+            )}
+          </div>
+        );
+      })()}
+
       {/* Active Spells Panel */}
       <div
         className="pointer-events-auto fixed bottom-[152px] right-2.5 z-20 flex flex-row gap-1.5 sm:bottom-auto sm:right-4 sm:top-[84px] sm:flex-col sm:gap-2"
@@ -554,12 +694,21 @@ export const GameHUD: React.FC<GameHUDProps> = ({
           const spec = UNIT_SPECS[hoveredUnitKind];
           const ally = ALLY_ALBUM.find((a) => a.unitKind === hoveredUnitKind);
           if (!spec) return null;
+          const activePetSpec = PET_SPECS[hud.selectedPet];
           const discountLvl = hud.talents?.towerDiscount ?? 0;
           const talentMult = Math.max(0.75, 1 - discountLvl * 0.04);
           const ironMult = hud.activePacts?.includes('iron') ? 1.15 : 1;
-          const effectiveCost = Math.max(10, Math.round(spec.cost * talentMult * ironMult));
-          const attackSpeed = (1 / spec.cooldown).toFixed(1);
-          const effectiveDamage = hud.paladinAuraActive ? Math.round(spec.damage * 1.2) : spec.damage;
+          const petCostMult = Math.max(0.5, 1 - activePetSpec.manaCostReductionPct);
+          const effectiveCost = Math.max(
+            10,
+            Math.round(spec.cost * talentMult * ironMult * petCostMult)
+          );
+          const petAtkSpeedMult = 1 + activePetSpec.attackSpeedBonusPct;
+          const effectiveCooldown = Math.max(0.2, spec.cooldown / petAtkSpeedMult);
+          const attackSpeed = (1 / effectiveCooldown).toFixed(1);
+          const paladinMult = hud.paladinAuraActive ? 1.2 : 1;
+          const petDmgMult = 1 + activePetSpec.damageBonusPct;
+          const effectiveDamage = Math.round(spec.damage * paladinMult * petDmgMult);
 
           return (
             <div
@@ -608,8 +757,10 @@ export const GameHUD: React.FC<GameHUDProps> = ({
                   </div>
                   <div className="font-mono-tabular text-sm font-black text-red-300">
                     {effectiveDamage}
-                    {hud.paladinAuraActive && (
-                      <span className="ml-1 text-[9px] font-bold text-[#38BDF8]">(Aura)</span>
+                    {(hud.paladinAuraActive || activePetSpec.damageBonusPct > 0) && (
+                      <span className="ml-1 text-[9px] font-bold text-[#FACC15]">
+                        ({activePetSpec.damageBonusPct > 0 ? activePetSpec.name : 'Aura'})
+                      </span>
                     )}
                   </div>
                   <div className="text-[9px] text-red-300/70">
@@ -638,7 +789,9 @@ export const GameHUD: React.FC<GameHUDProps> = ({
                   <div className="font-mono-tabular text-sm font-black text-amber-300">
                     {attackSpeed}/s
                   </div>
-                  <div className="text-[9px] text-amber-300/70">{spec.cooldown}s cadência</div>
+                  <div className="text-[9px] text-amber-300/70">
+                    {effectiveCooldown.toFixed(2)}s cadência
+                  </div>
                 </div>
               </div>
 
@@ -658,6 +811,7 @@ export const GameHUD: React.FC<GameHUDProps> = ({
           const discountLvl = hud.talents?.towerDiscount ?? 0;
           const talentMult = Math.max(0.75, 1 - discountLvl * 0.04);
           const ironMult = hud.activePacts?.includes('iron') ? 1.15 : 1;
+          const petCostMult = Math.max(0.5, 1 - PET_SPECS[hud.selectedPet].manaCostReductionPct);
           return (
             <div
               data-testid="ally-dock"
@@ -666,7 +820,10 @@ export const GameHUD: React.FC<GameHUDProps> = ({
               {unlockedAllies.map((ally) => {
                 const kind = ally.unitKind;
                 const spec = UNIT_SPECS[kind];
-                const effectiveCost = Math.max(10, Math.round(spec.cost * talentMult * ironMult));
+                const effectiveCost = Math.max(
+                  10,
+                  Math.round(spec.cost * talentMult * ironMult * petCostMult)
+                );
                 const isSelected = hud.selectedUnit === kind;
                 const canAfford = hud.essence >= effectiveCost;
                 return (

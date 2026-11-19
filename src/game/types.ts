@@ -2,6 +2,295 @@ export type GamePhase = 'title' | 'playing' | 'paused' | 'victory' | 'gameover';
 
 export type HeroClass = 'archer' | 'swordsman' | 'bomber';
 
+export type PetKind = 'turtle' | 'tiger' | 'rabbit' | 'owl' | 'cat';
+
+export interface PetSpec {
+  kind: PetKind;
+  name: string;
+  title: string;
+  shortBonus: string;
+  description: string;
+  primaryColor: string;
+  secondaryColor: string;
+  accentColor: string;
+  glowColor: string;
+  auraInner: string;
+  auraOuter: string;
+  castleHpBonusPct: number;
+  castleRegenPerSec: number;
+  damageBonusPct: number;
+  attackSpeedBonusPct: number;
+  manaCostReductionPct: number;
+  spellCooldownReductionPct: number;
+  itemDropLuckBonusPct: number;
+}
+
+export const PET_ORDER: ReadonlyArray<PetKind> = ['turtle', 'tiger', 'rabbit', 'owl', 'cat'];
+
+export const PET_SPECS: Record<PetKind, PetSpec> = {
+  turtle: {
+    kind: 'turtle',
+    name: 'Tartaruga',
+    title: 'Guardiã da Muralha',
+    shortBonus: '+35% HP Castelo · +2 HP/s',
+    description: 'Amuleto de Jade Ancestral: amplia a vida máxima do castelo em +35% e regenera +2 HP/s continuamente.',
+    primaryColor: '#10B981',
+    secondaryColor: '#065F46',
+    accentColor: '#FACC15',
+    glowColor: 'rgba(16, 185, 129, 0.55)',
+    auraInner: 'rgba(110, 231, 183, 0.42)',
+    auraOuter: 'rgba(16, 185, 129, 0)',
+    castleHpBonusPct: 0.35,
+    castleRegenPerSec: 2,
+    damageBonusPct: 0,
+    attackSpeedBonusPct: 0,
+    manaCostReductionPct: 0,
+    spellCooldownReductionPct: 0,
+    itemDropLuckBonusPct: 0,
+  },
+  tiger: {
+    kind: 'tiger',
+    name: 'Tigre',
+    title: 'Espírito da Fúria',
+    shortBonus: '+18% Dano Herói & Aliados',
+    description: 'Amuleto Solar Rubi: fortalece o ataque do herói principal e de todos os aliados em campo em +18%.',
+    primaryColor: '#F97316',
+    secondaryColor: '#9A3412',
+    accentColor: '#FDE047',
+    glowColor: 'rgba(249, 115, 22, 0.55)',
+    auraInner: 'rgba(253, 186, 116, 0.44)',
+    auraOuter: 'rgba(239, 68, 68, 0)',
+    castleHpBonusPct: 0,
+    castleRegenPerSec: 0,
+    damageBonusPct: 0.18,
+    attackSpeedBonusPct: 0,
+    manaCostReductionPct: 0,
+    spellCooldownReductionPct: 0,
+    itemDropLuckBonusPct: 0,
+  },
+  rabbit: {
+    kind: 'rabbit',
+    name: 'Coelho',
+    title: 'Pulso Lunar',
+    shortBonus: '+20% Vel. Ataque Geral',
+    description: 'Amuleto de Safira Veloz: acelera a cadência de ataque do herói principal e de todos os aliados em +20%.',
+    primaryColor: '#38BDF8',
+    secondaryColor: '#0369A1',
+    accentColor: '#E0F2FE',
+    glowColor: 'rgba(56, 189, 248, 0.55)',
+    auraInner: 'rgba(186, 230, 253, 0.44)',
+    auraOuter: 'rgba(0, 212, 255, 0)',
+    castleHpBonusPct: 0,
+    castleRegenPerSec: 0,
+    damageBonusPct: 0,
+    attackSpeedBonusPct: 0.2,
+    manaCostReductionPct: 0,
+    spellCooldownReductionPct: 0,
+    itemDropLuckBonusPct: 0,
+  },
+  owl: {
+    kind: 'owl',
+    name: 'Coruja',
+    title: 'Sábia do Éter',
+    shortBonus: '-20% Custo Mana · -15% Recarga',
+    description: 'Amuleto Arcano Violeta: reduz em 20% o custo de mana/essência das tropas e em 15% a recarga de magias.',
+    primaryColor: '#A855F7',
+    secondaryColor: '#4C1D95',
+    accentColor: '#FACC15',
+    glowColor: 'rgba(168, 85, 247, 0.55)',
+    auraInner: 'rgba(216, 180, 254, 0.42)',
+    auraOuter: 'rgba(139, 92, 246, 0)',
+    castleHpBonusPct: 0,
+    castleRegenPerSec: 0,
+    damageBonusPct: 0,
+    attackSpeedBonusPct: 0,
+    manaCostReductionPct: 0.2,
+    spellCooldownReductionPct: 0.15,
+    itemDropLuckBonusPct: 0,
+  },
+  cat: {
+    kind: 'cat',
+    name: 'Gato',
+    title: 'Amuleto da Fortuna',
+    shortBonus: '+35% Sorte de Drop de Itens',
+    description: 'Amuleto Dourado da Sorte: emana bênção de fortuna que concede +35% de sorte para drop de itens.',
+    primaryColor: '#FACC15',
+    secondaryColor: '#7C3AED',
+    accentColor: '#FEF08A',
+    glowColor: 'rgba(250, 204, 21, 0.58)',
+    auraInner: 'rgba(254, 240, 138, 0.45)',
+    auraOuter: 'rgba(250, 204, 21, 0)',
+    castleHpBonusPct: 0,
+    castleRegenPerSec: 0,
+    damageBonusPct: 0,
+    attackSpeedBonusPct: 0,
+    manaCostReductionPct: 0,
+    spellCooldownReductionPct: 0,
+    itemDropLuckBonusPct: 35,
+  },
+};
+
+export type RingSkinId = 'classic' | 'frost' | 'crimson' | 'eclipse';
+export type FxStyleId = 'standard' | 'arcane' | 'solar' | 'venom';
+
+export interface RingSkinSpec {
+  id: RingSkinId;
+  name: string;
+  description: string;
+  cost: number;
+  primaryColor: string;
+  secondaryColor: string;
+  runeColor: string;
+  glowColor: string;
+}
+
+export interface FxStyleSpec {
+  id: FxStyleId;
+  name: string;
+  description: string;
+  cost: number;
+  projectileTint: string;
+  slashTint: string;
+}
+
+export interface AchievementSpec {
+  id: string;
+  title: string;
+  description: string;
+  category: 'combat' | 'mastery' | 'progression';
+  target: number;
+  rewardSouls: number;
+}
+
+export const RING_SKINS: Record<RingSkinId, RingSkinSpec> = {
+  classic: {
+    id: 'classic',
+    name: 'Anel Brasa Clássica',
+    description: 'Ouro forjado e runas solares da cidadela original.',
+    cost: 0,
+    primaryColor: '#FACC15',
+    secondaryColor: '#F97316',
+    runeColor: '#FEF08A',
+    glowColor: 'rgba(250, 204, 21, 0.5)',
+  },
+  frost: {
+    id: 'frost',
+    name: 'Anel Geada Glacial',
+    description: 'Cristais árticos que brilham em ciano elétrico.',
+    cost: 12,
+    primaryColor: '#00D4FF',
+    secondaryColor: '#38BDF8',
+    runeColor: '#E0F2FE',
+    glowColor: 'rgba(0, 212, 255, 0.55)',
+  },
+  crimson: {
+    id: 'crimson',
+    name: 'Anel Rubi Abissal',
+    description: 'Energia carmesim forjada nas profundezas do cerco.',
+    cost: 18,
+    primaryColor: '#FF2E4C',
+    secondaryColor: '#DC2626',
+    runeColor: '#FCA5A5',
+    glowColor: 'rgba(255, 46, 76, 0.55)',
+  },
+  eclipse: {
+    id: 'eclipse',
+    name: 'Anel Eclipse Real',
+    description: 'Ametista mística com núcleo estelar dourado.',
+    cost: 25,
+    primaryColor: '#A855F7',
+    secondaryColor: '#FACC15',
+    runeColor: '#E9D5FF',
+    glowColor: 'rgba(168, 85, 247, 0.55)',
+  },
+};
+
+export const FX_STYLES: Record<FxStyleId, FxStyleSpec> = {
+  standard: {
+    id: 'standard',
+    name: 'Chama Padrão',
+    description: 'Disparos e cortes clássicos em ciano e ouro.',
+    cost: 0,
+    projectileTint: '#00D4FF',
+    slashTint: '#FACC15',
+  },
+  arcane: {
+    id: 'arcane',
+    name: 'Pulso Arcano',
+    description: 'Rastros violeta e centelhas astrais nos ataques.',
+    cost: 10,
+    projectileTint: '#C084FC',
+    slashTint: '#38BDF8',
+  },
+  solar: {
+    id: 'solar',
+    name: 'Explosão Solar',
+    description: 'Cortes incandescentes dourados e faíscas rubras.',
+    cost: 15,
+    projectileTint: '#FACC15',
+    slashTint: '#FF2E4C',
+  },
+  venom: {
+    id: 'venom',
+    name: 'Esmeralda Tóxica',
+    description: 'Traços ácidos em verde jade e lima brilhante.',
+    cost: 15,
+    projectileTint: '#10B981',
+    slashTint: '#A3E635',
+  },
+};
+
+export const ACHIEVEMENT_CATALOG: ReadonlyArray<AchievementSpec> = [
+  {
+    id: 'first_blood',
+    title: 'Primeiro Guardião',
+    description: 'Abata 25 inimigos nas rotas da cidadela.',
+    category: 'combat',
+    target: 25,
+    rewardSouls: 6,
+  },
+  {
+    id: 'slayer_250',
+    title: 'Sentinela Incansável',
+    description: 'Acumule 250 abates totais em sua campanha.',
+    category: 'combat',
+    target: 250,
+    rewardSouls: 14,
+  },
+  {
+    id: 'first_merge',
+    title: 'Alquimia de Batalha',
+    description: 'Realize 5 fusões de aliados no campo.',
+    category: 'mastery',
+    target: 5,
+    rewardSouls: 8,
+  },
+  {
+    id: 'stage_5',
+    title: 'Muralha Consolidada',
+    description: 'Desbloqueie a Fase 5 da campanha.',
+    category: 'progression',
+    target: 5,
+    rewardSouls: 10,
+  },
+  {
+    id: 'stage_15',
+    title: 'Comandante das Rotas',
+    description: 'Alcance a Fase 15 enfrentando cercos múltiplos.',
+    category: 'progression',
+    target: 15,
+    rewardSouls: 18,
+  },
+  {
+    id: 'hero_lv10',
+    title: 'Campeão da Brasa',
+    description: 'Evolua qualquer Herói Principal até o Nível 10.',
+    category: 'mastery',
+    target: 10,
+    rewardSouls: 15,
+  },
+];
+
 export type UnitKind =
   | 'scout'
   | 'frog'
@@ -99,25 +388,25 @@ export const HERO_UPGRADE_CATALOG: Record<HeroUpgradeId, HeroUpgradeOption> = {
   power: {
     id: 'power',
     title: 'Poder Bruto',
-    effectText: '+14% Dano do Herói e +3% Crítico',
+    effectText: '+7% Dano do Herói e +1.5% Crítico',
     accent: 'crimson',
   },
   haste: {
     id: 'haste',
     title: 'Ritmo Veloz',
-    effectText: '+12% Cadência e +6% Alcance',
+    effectText: '+6% Cadência e +3% Alcance',
     accent: 'electric',
   },
   fortress: {
     id: 'fortress',
     title: 'Muralha & Tropas',
-    effectText: '+20 HP Máx., cura +25 HP e +22% Dano Tropas',
+    effectText: '+20 HP Máx., cura +25 HP e +11% Dano Tropas',
     accent: 'gold',
   },
   area: {
     id: 'area',
     title: 'Impacto Amplo',
-    effectText: '+16% Área/Recuo e +12% Dano Especial',
+    effectText: '+8% Área/Recuo e +5% Dano Especial',
     accent: 'gold',
   },
 };
@@ -567,6 +856,16 @@ export interface HudSnapshot {
   activePacts: string[];
   ringRotation: number;
   ringHeat: number;
+  selectedPet: PetKind;
+  petDropLuckBonus: number;
+  enemyKillsByCatalogId: Record<number, number>;
+  discoveredEnemyIds: number[];
+  unlockedAchievements: string[];
+  achievementProgress: Record<string, number>;
+  unlockedCosmetics: string[];
+  equippedRingSkin: RingSkinId;
+  equippedFxStyle: FxStyleId;
+  totalLifetimeKills: number;
 }
 
 export const HERO_SPECS: Record<HeroClass, HeroSpec> = {

@@ -1171,16 +1171,17 @@ export function getHeroStatsForLevel(
 } {
   const spec = HERO_SPECS[heroClass];
   const delta = Math.max(0, Math.min(MAX_HERO_LEVEL, level) - 1);
-  // Modest linear damage scaling so fast Hero level-ups feel rewarding without soloing waves
-  const damageMult = 1 + delta * 0.085;
+  // 50% slower strictly linear strength progression per Hero level
+  const damageMult = 1 + delta * 0.0425;
+  const cooldownMult = Math.max(0.75, 1 - delta * 0.0075);
 
   return {
     damage: Math.round(spec.damage * damageMult),
-    cooldown: Math.max(0.24, Number((spec.cooldown * Math.pow(0.985, delta)).toFixed(3))),
-    range: Math.round(spec.range * (1 + Math.min(0.28, delta * 0.012))),
-    critChance: Math.min(0.36, Number((spec.critChance + delta * 0.008).toFixed(3))),
+    cooldown: Math.max(0.24, Number((spec.cooldown * cooldownMult).toFixed(3))),
+    range: Math.round(spec.range * (1 + Math.min(0.14, delta * 0.006))),
+    critChance: Math.min(0.26, Number((spec.critChance + delta * 0.004).toFixed(3))),
     blastRadius:
-      spec.blastRadius > 0 ? Math.round(spec.blastRadius * (1 + Math.min(0.35, delta * 0.015))) : 0,
+      spec.blastRadius > 0 ? Math.round(spec.blastRadius * (1 + Math.min(0.18, delta * 0.0075))) : 0,
   };
 }
 
@@ -1626,18 +1627,43 @@ export function canMergeUnits(
   return true;
 }
 
+export function getUnitStatsForLevel(
+  kind: UnitEntity['kind'],
+  level: number
+): {
+  damage: number;
+  maxHp: number;
+  cooldown: number;
+  range: number;
+  critChance: number;
+} {
+  const spec = UNIT_SPECS[kind];
+  const levelDelta = Math.max(0, Math.min(MAX_UNIT_LEVEL, level) - 1);
+  // 50% slower strictly linear strength progression per Ally merge level
+  const damageMult = 1 + levelDelta * 0.475;
+  const maxHpMult = 1 + levelDelta * 0.375;
+  const cooldownMult = Math.max(0.65, 1 - levelDelta * 0.08);
+
+  return {
+    damage: Math.round(spec.damage * damageMult),
+    maxHp: Math.round(spec.maxHp * maxHpMult),
+    cooldown: Math.max(0.24, Number((spec.cooldown * cooldownMult).toFixed(3))),
+    range: Math.round(spec.range * (1 + levelDelta * 0.05)),
+    critChance: Math.min(0.5, Number((spec.critChance + levelDelta * 0.025).toFixed(3))),
+  };
+}
+
 export function applyMergeUpgrade(target: UnitEntity): UnitEntity {
   const nextLevel = Math.min(MAX_UNIT_LEVEL, target.level + 1);
-  const spec = UNIT_SPECS[target.kind];
-  const levelDelta = nextLevel - 1;
+  const scaled = getUnitStatsForLevel(target.kind, nextLevel);
 
   target.level = nextLevel;
-  target.damage = Math.round(spec.damage * Math.pow(1.95, levelDelta));
-  target.maxHp = Math.round(spec.maxHp * Math.pow(1.75, levelDelta));
+  target.damage = scaled.damage;
+  target.maxHp = scaled.maxHp;
   target.hp = target.maxHp;
-  target.cooldown = Math.max(0.24, Number((spec.cooldown * Math.pow(0.84, levelDelta)).toFixed(3)));
-  target.range = Math.round(spec.range * (1 + levelDelta * 0.1));
-  target.critChance = Math.min(0.65, spec.critChance + levelDelta * 0.05);
+  target.cooldown = scaled.cooldown;
+  target.range = scaled.range;
+  target.critChance = scaled.critChance;
   target.attackAnim = 1;
   return target;
 }
@@ -1754,3 +1780,52 @@ export function findSlotAtPoint(
   }
   return null;
 }
+
+/**
+ * Computes the stationary guard position for the active Passive Pet right beside the Castle.
+ * Evaluates candidate side positions around (castleX, castleY) and picks the spot that stays
+ * inside safe viewport bounds while maximizing clearance from all incoming enemy routes.
+ */
+export function computeCastlePetPosition(arena: ArenaConfig): { x: number; y: number } {
+  const { castleX: cx, castleY: cy, worldWidth, worldHeight } = arena;
+  const minX = 68;
+  const maxX = worldWidth - 58;
+  const minY = 128;
+  const maxY = worldHeight - 108;
+
+  // Ordered by visual preference: right beside the Castle (east guard post), then south-east, north-east, south, north, west
+  const candidates: Array<{ x: number; y: number; pref: number }> = [
+    { x: cx + 82, y: cy + 12, pref: 18 },
+    { x: cx + 76, y: cy + 56, pref: 14 },
+    { x: cx + 76, y: cy - 42, pref: 12 },
+    { x: cx + 10, y: cy + 92, pref: 10 },
+    { x: cx + 10, y: cy - 94, pref: 8 },
+    { x: cx - 84, y: cy + 68, pref: 4 },
+    { x: cx - 84, y: cy - 68, pref: 2 },
+  ];
+
+  let best = { x: Math.min(maxX, cx + 82), y: Math.min(maxY, Math.max(minY, cy + 12)) };
+  let bestScore = -Infinity;
+
+  for (const c of candidates) {
+    if (c.x < minX || c.x > maxX || c.y < minY || c.y > maxY) continue;
+    let minRoadDist = Infinity;
+    for (const branch of arena.routes) {
+      const wps = branch.waypoints;
+      for (let i = 0; i < wps.length - 1; i++) {
+        const d = pointToSegmentDistance(c.x, c.y, wps[i].x, wps[i].y, wps[i + 1].x, wps[i + 1].y);
+        if (d < minRoadDist) minRoadDist = d;
+      }
+    }
+    // Strongly prefer candidates clearly off the road (roadHalfWidth + 24 = 54px+)
+    const clearanceScore = Math.min(minRoadDist, 120) + (minRoadDist >= arena.roadHalfWidth + 22 ? 60 : -120);
+    const totalScore = clearanceScore + c.pref;
+    if (totalScore > bestScore) {
+      bestScore = totalScore;
+      best = { x: Math.round(c.x), y: Math.round(c.y) };
+    }
+  }
+
+  return best;
+}
+

@@ -40,18 +40,23 @@ import {
   HeroUpgradeId,
   HudSnapshot,
   MAX_HERO_LEVEL,
+  PET_ORDER,
+  PET_SPECS,
+  PetKind,
   RING_SKINS,
   RingSkinId,
   TOTAL_STAGES,
 } from '../game/types';
 import { TALENT_SPECS } from '../game/simulation';
 import { AlbumTab } from './AlbumModal';
+import { PetPortraitSvg } from './PetArtwork';
 
 interface GameModalsProps {
   hud: HudSnapshot;
   selectedStage: number;
   convergenceStages: ReadonlyArray<number>;
   onSelectHero: (heroClass: HeroClass) => void;
+  onSelectPet: (pet: PetKind) => void;
   onSelectStage: (stage: number) => void;
   onSelectUpgrade: (upgradeId: HeroUpgradeId) => void;
   onUpgradeTalent: (talentId: string) => void;
@@ -105,6 +110,7 @@ export const GameModals: React.FC<GameModalsProps> = ({
   selectedStage,
   convergenceStages,
   onSelectHero,
+  onSelectPet,
   onSelectStage,
   onSelectUpgrade,
   onUpgradeTalent,
@@ -409,6 +415,97 @@ export const GameModals: React.FC<GameModalsProps> = ({
                 );
               })}
             </div>
+          </section>
+
+          {/* 1.5. Passive Castle Guardian Pet Selector (Amuleto da Sorte) */}
+          <section
+            aria-label="Pet Guardião do Castelo"
+            data-testid="menu-pet-selector"
+            className="w-full rounded-2xl border-2 border-[#334155] bg-[#0F172A]/95 p-3 shadow-[0_8px_0_rgba(2,6,23,0.85)] sm:p-3.5"
+          >
+            {(() => {
+              const activePet = PET_SPECS[hud.selectedPet];
+              return (
+                <>
+                  <div className="mb-2 flex flex-wrap items-center justify-between gap-2">
+                    <div className="flex items-center gap-1.5">
+                      <Sparkles className="h-4 w-4 shrink-0" style={{ color: activePet.primaryColor }} />
+                      <h2 className="font-display text-base font-bold text-white sm:text-lg">
+                        Pet Guardião do Castelo
+                      </h2>
+                    </div>
+                    <span className="text-[11px] font-semibold text-[#94A3B8]">
+                      Aura passiva ao lado do castelo · troque quando quiser
+                    </span>
+                  </div>
+
+                  <div className="grid grid-cols-2 gap-1.5 sm:grid-cols-5 sm:gap-2">
+                    {PET_ORDER.map((petKind) => {
+                      const spec = PET_SPECS[petKind];
+                      const isSelected = hud.selectedPet === petKind;
+                      return (
+                        <button
+                          key={petKind}
+                          type="button"
+                          data-testid={`menu-pet-card-${petKind}`}
+                          aria-pressed={isSelected}
+                          onClick={() => {
+                            soundEngine.playClick();
+                            onSelectPet(petKind);
+                          }}
+                          className={`group flex flex-col items-center rounded-xl border-2 px-2 py-2 text-center transition-transform active:translate-y-0.5 ${
+                            isSelected
+                              ? 'bg-[#162033]'
+                              : 'border-[#1E293B] bg-[#080D1A]/90 hover:border-[#475569] hover:bg-[#111B2E]'
+                          }`}
+                          style={
+                            isSelected
+                              ? {
+                                  borderColor: spec.primaryColor,
+                                  boxShadow: `0 4px 0 rgba(2,6,23,0.9), 0 0 18px ${spec.glowColor}`,
+                                }
+                              : undefined
+                          }
+                        >
+                          <div
+                            className="flex h-12 w-12 items-center justify-center rounded-xl border border-white/10 bg-[#050A14]"
+                            style={{
+                              boxShadow: isSelected ? `inset 0 0 14px ${spec.glowColor}` : undefined,
+                            }}
+                          >
+                            <PetPortraitSvg pet={petKind} className="h-11 w-11" />
+                          </div>
+                          <div className="mt-1.5 font-display text-xs font-bold leading-tight text-white">
+                            {spec.name}
+                          </div>
+                          <div
+                            className="mt-0.5 text-[10px] font-bold leading-tight"
+                            style={{ color: spec.primaryColor }}
+                          >
+                            {spec.shortBonus}
+                          </div>
+                        </button>
+                      );
+                    })}
+                  </div>
+
+                  <div
+                    className="mt-2 flex flex-wrap items-center justify-between gap-2 rounded-xl border bg-[#080D1A]/90 px-3 py-1.5 text-left"
+                    style={{ borderColor: `${activePet.primaryColor}55` }}
+                  >
+                    <div className="text-xs leading-snug text-[#E2E8F0]">
+                      <span className="font-display font-bold" style={{ color: activePet.primaryColor }}>
+                        {activePet.title}:
+                      </span>{' '}
+                      <span>{activePet.description}</span>
+                    </div>
+                    <span className="shrink-0 text-[10px] font-bold uppercase tracking-wider text-[#94A3B8]">
+                      Guardião 100% Passivo
+                    </span>
+                  </div>
+                </>
+              );
+            })()}
           </section>
 
           {/* 2. Códice de Brasa, Talentos & Loja de Aparências */}

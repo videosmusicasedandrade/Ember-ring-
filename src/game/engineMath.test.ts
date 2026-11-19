@@ -20,6 +20,7 @@ import {
   buildArenaSlots,
   canMergeUnits,
   circlesCollide,
+  computeCastlePetPosition,
   computeEnemyEssenceReward,
   computeRadialKnockbackVector,
   computeRouteSpawnPoint,
@@ -38,6 +39,7 @@ import {
   getHeroRankTitle,
   getHeroStatsForLevel,
   getStageConfig,
+  getUnitStatsForLevel,
   isValidFreeHeroPosition,
   isEliteEnemy,
   pointToSegmentDistance,
@@ -54,6 +56,8 @@ import {
   HeroEntity,
   MAX_HERO_LEVEL,
   MAX_UNIT_LEVEL,
+  PET_ORDER,
+  PET_SPECS,
   TOTAL_STAGES,
   UNIT_SPECS,
   UnitEntity,
@@ -669,7 +673,21 @@ test('all UNIT_SPECS define valid damage, range, and attack speed for tooltip ov
   assert.equal(boostedScoutDamage, 14);
 });
 
-test('applyMergeUpgrade scales fighter power drastically faster than Hero levels', () => {
+test('applyMergeUpgrade and getHeroStatsForLevel scale strength linearly at 50% slower pace', () => {
+  // Allies: strictly linear +47.5% damage and +37.5% HP per merge level (half of old +95%/+75% exponential)
+  const lv1 = getUnitStatsForLevel('sniper', 1);
+  const lv2 = getUnitStatsForLevel('sniper', 2);
+  const lv3 = getUnitStatsForLevel('sniper', 3);
+  const lv4 = getUnitStatsForLevel('sniper', 4);
+
+  const step12 = lv2.damage - lv1.damage;
+  const step23 = lv3.damage - lv2.damage;
+  const step34 = lv4.damage - lv3.damage;
+  assert.ok(Math.abs(step12 - step23) <= 1 && Math.abs(step23 - step34) <= 1, 'Ally damage progression must be linear');
+  assert.equal(lv2.damage, Math.round(UNIT_SPECS.sniper.damage * 1.475));
+  assert.equal(lv3.damage, Math.round(UNIT_SPECS.sniper.damage * 1.95));
+  assert.equal(lv4.damage, Math.round(UNIT_SPECS.sniper.damage * 2.425));
+
   const unit = makeUnit({
     id: 20,
     kind: 'scout',
@@ -681,10 +699,17 @@ test('applyMergeUpgrade scales fighter power drastically faster than Hero levels
   applyMergeUpgrade(unit); // Lv.2
   applyMergeUpgrade(unit); // Lv.3
   assert.equal(unit.level, 3);
-  assert.ok(
-    unit.damage >= lv1Dmg * 3.5,
-    `Merged Lv.3 unit dmg (${unit.damage}) should be >= 3.5x Lv.1 (${lv1Dmg})`
-  );
+  assert.equal(unit.damage, Math.round(lv1Dmg * 1.95));
+
+  // Main Hero: strictly linear +4.25% damage per level (half of old +8.5%)
+  const h1 = getHeroStatsForLevel('swordsman', 1);
+  const h11 = getHeroStatsForLevel('swordsman', 11);
+  const h21 = getHeroStatsForLevel('swordsman', 21);
+  const hStep1 = h11.damage - h1.damage;
+  const hStep2 = h21.damage - h11.damage;
+  assert.ok(Math.abs(hStep1 - hStep2) <= 1, 'Hero damage progression must be linear');
+  assert.equal(h11.damage, Math.round(h1.damage * (1 + 10 * 0.0425)));
+  assert.equal(h21.damage, Math.round(h1.damage * (1 + 20 * 0.0425)));
 });
 
 test('GameSimulation supports Ember Soul talents, Pact choices, and 360-degree Ring rotation', () => {
@@ -718,4 +743,95 @@ test('GameSimulation supports Ember Soul talents, Pact choices, and 360-degree R
   assert.ok(sim.activePacts.includes('iron'));
   assert.equal(sim.baseMaxHp, prevMaxHp + 50);
 });
+
+test('PET_SPECS defines all 5 passive castle guardian pets with distinct bonuses', () => {
+  assert.deepEqual(PET_ORDER, ['turtle', 'tiger', 'rabbit', 'owl', 'cat']);
+  assert.equal(PET_SPECS.turtle.castleHpBonusPct, 0.35);
+  assert.equal(PET_SPECS.turtle.castleRegenPerSec, 2);
+  assert.equal(PET_SPECS.tiger.damageBonusPct, 0.18);
+  assert.equal(PET_SPECS.rabbit.attackSpeedBonusPct, 0.2);
+  assert.equal(PET_SPECS.owl.manaCostReductionPct, 0.2);
+  assert.equal(PET_SPECS.owl.spellCooldownReductionPct, 0.15);
+  assert.equal(PET_SPECS.cat.itemDropLuckBonusPct, 35);
+});
+
+test('computeCastlePetPosition places the pet beside the Castle safely across all 150 stages', () => {
+  for (let stage = 1; stage <= TOTAL_STAGES; stage++) {
+    const arena = buildArenaForStage(stage, false);
+    const pos = computeCastlePetPosition(arena);
+    const distFromCastle = Math.hypot(pos.x - arena.castleX, pos.y - arena.castleY);
+
+    assert.ok(
+      pos.x >= 50 && pos.x <= arena.worldWidth - 50 && pos.y >= 70 && pos.y <= arena.worldHeight - 100,
+      `Stage ${stage}: pet position (${pos.x}, ${pos.y}) must stay inside safe viewport bounds`
+    );
+    assert.ok(
+      distFromCastle >= 60 && distFromCastle <= 125,
+      `Stage ${stage}: pet must stand beside Castle (dist ${distFromCastle.toFixed(1)})`
+    );
+
+    // Ensure pet does not sit directly on top of any route centerline
+    for (const route of arena.routes) {
+      for (let i = 0; i < route.waypoints.length - 1; i++) {
+        const a = route.waypoints[i];
+        const b = route.waypoints[i + 1];
+        const segDist = pointToSegmentDistance(pos.x, pos.y, a.x, a.y, b.x, b.y);
+        assert.ok(
+          segDist >= 30,
+          `Stage ${stage}: pet (${pos.x}, ${pos.y}) too close to route ${route.id} (dist ${segDist.toFixed(1)})`
+        );
+      }
+    }
+  }
+});
+
+test('GameSimulation.setSelectedPet instantly updates all 5 passive guardian bonuses', () => {
+  const sim = new GameSimulation();
+  sim.setSelectedPet('cat');
+  sim.resetWorld('playing', 1, 'archer');
+
+  const baseCastleMaxHp = sim.baseMaxHp;
+  const baseHeroDamage = sim.hero.damage;
+  const baseHeroCooldown = sim.hero.cooldown;
+  const baseUnitCost = sim.getEffectiveUnitCost('scout');
+  const baseSpellMult = sim.getSpellCooldownMultiplier();
+
+  // Cat exposes +35% item drop luck ready for item drops
+  assert.equal(sim.getHudSnapshot().selectedPet, 'cat');
+  assert.equal(sim.getHudSnapshot().petDropLuckBonus, 35);
+
+  // Recruit a unit so we verify unit passives update live too
+  sim.essence = 500;
+  assert.equal(sim.quickRecruitUnit('scout'), true);
+  const unit = sim.units[0];
+  const baseUnitDamage = unit.damage;
+  const baseUnitCooldown = unit.cooldown;
+
+  // Turtle: +35% Castle Max HP & +2 HP/s Castle regeneration
+  sim.setSelectedPet('turtle');
+  assert.equal(sim.baseMaxHp, Math.round(baseCastleMaxHp * 1.35));
+  sim.baseHp = sim.baseMaxHp - 10;
+  for (let i = 0; i < 20; i++) {
+    sim.update(0.05);
+  }
+  assert.ok(sim.baseHp >= sim.baseMaxHp - 8.05, `Turtle should regenerate +2 HP/s, got ${sim.baseHp}`);
+
+  // Tiger: +18% Hero & Ally damage
+  sim.setSelectedPet('tiger');
+  assert.equal(sim.baseMaxHp, baseCastleMaxHp);
+  assert.ok(sim.hero.damage > baseHeroDamage, 'Tiger should boost Hero damage');
+  assert.ok(unit.damage > baseUnitDamage, 'Tiger should boost Ally damage');
+
+  // Rabbit: +20% Hero & Ally attack speed (lower cooldown)
+  sim.setSelectedPet('rabbit');
+  assert.ok(sim.hero.cooldown < baseHeroCooldown, 'Rabbit should reduce Hero attack cooldown');
+  assert.ok(unit.cooldown < baseUnitCooldown, 'Rabbit should reduce Ally attack cooldown');
+
+  // Owl: -20% Ally recruitment cost & -15% Spell cooldown multiplier
+  sim.setSelectedPet('owl');
+  assert.ok(sim.getEffectiveUnitCost('scout') < baseUnitCost, 'Owl should reduce Ally recruitment cost');
+  assert.ok(sim.getSpellCooldownMultiplier() < baseSpellMult, 'Owl should reduce spell cooldown multiplier');
+  assert.equal(sim.getHudSnapshot().petDropLuckBonus, 0);
+});
+
 

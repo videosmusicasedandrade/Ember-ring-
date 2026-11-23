@@ -3,6 +3,7 @@ import { AlbumModal, AlbumTab } from './components/AlbumModal';
 import { GameCanvas } from './components/GameCanvas';
 import { GameHUD } from './components/GameHUD';
 import { GameModals } from './components/GameModals';
+import { SimulatedAdModal } from './components/SimulatedAdModal';
 import { soundEngine } from './game/audio';
 import { getUnlockedAlliesForStage } from './game/bestiaryData';
 import { GameSimulation } from './game/simulation';
@@ -62,6 +63,11 @@ export default function App() {
     () => simRef.current!.currentStage
   );
   const [albumTab, setAlbumTab] = useState<AlbumTab | null>(null);
+  const [simulatedAd, setSimulatedAd] = useState<{ open: boolean; targetPet: PetKind | null }>({
+    open: false,
+    targetPet: null,
+  });
+  const wasPlayingBeforeAdRef = useRef(false);
 
   const syncBodyDataset = useCallback((snap: HudSnapshot) => {
     document.body.dataset.state = snap.phase === 'victory' ? 'gameover' : snap.phase;
@@ -120,6 +126,38 @@ export default function App() {
     },
     [syncHud]
   );
+
+  const handleRequestPetAd = useCallback(
+    (targetPet?: PetKind) => {
+      const sim = simRef.current;
+      if (!sim) return;
+      if (sim.phase === 'playing') {
+        wasPlayingBeforeAdRef.current = true;
+        sim.phase = 'paused';
+        syncHud();
+      } else {
+        wasPlayingBeforeAdRef.current = false;
+      }
+      setSimulatedAd({ open: true, targetPet: targetPet ?? null });
+    },
+    [syncHud]
+  );
+
+  const handleCompleteSimulatedAd = useCallback(() => {
+    const sim = simRef.current;
+    const chosenPet = simulatedAd.targetPet;
+    setSimulatedAd({ open: false, targetPet: null });
+    if (!sim) return;
+    sim.unlockPetChoiceViaAd();
+    if (chosenPet) {
+      sim.setSelectedPet(chosenPet);
+    }
+    if (wasPlayingBeforeAdRef.current && sim.phase === 'paused') {
+      sim.phase = 'playing';
+    }
+    wasPlayingBeforeAdRef.current = false;
+    syncHud();
+  }, [simulatedAd.targetPet, syncHud]);
 
   const handleSelectStage = useCallback(
     (stageNum: number) => {
@@ -333,12 +371,6 @@ export default function App() {
       const sim = simRef.current;
       if (!sim) return;
 
-      if (sim.phase === 'title' && albumTab === null && (e.key === 'Enter' || e.key === ' ')) {
-        e.preventDefault();
-        handleStart(selectedStage);
-        return;
-      }
-
       if (
         e.key === 'Escape' &&
         sim.phase === 'playing' &&
@@ -419,6 +451,7 @@ export default function App() {
         onToggleHeroReposition={handleToggleHeroReposition}
         onSelectActiveHero={handleSelectActiveHero}
         onSelectPet={handleSelectPet}
+        onRequestPetAd={handleRequestPetAd}
         onActivateSpell={handleActivateSpell}
         onTogglePause={handleTogglePause}
         onToggleMuteMusic={handleToggleMuteMusic}
@@ -432,6 +465,7 @@ export default function App() {
         convergenceStages={simRef.current!.convergenceStages}
         onSelectHero={handleSelectHero}
         onSelectPet={handleSelectPet}
+        onRequestPetAd={handleRequestPetAd}
         onSelectStage={handleSelectStage}
         onSelectUpgrade={handleSelectUpgrade}
         onUpgradeTalent={handleUpgradeTalent}
@@ -455,6 +489,11 @@ export default function App() {
         achievementProgress={hud.achievementProgress}
         emberSouls={hud.emberSouls}
         onClose={() => setAlbumTab(null)}
+      />
+      <SimulatedAdModal
+        isOpen={simulatedAd.open}
+        targetPet={simulatedAd.targetPet}
+        onCompleteAndClose={handleCompleteSimulatedAd}
       />
     </main>
   );

@@ -11,6 +11,7 @@ import {
   applyDamageToEnemy,
   applyHeroXpGain,
   applyMergeUpgrade,
+  applyUnitXpGain,
   buildArenaForStage,
   buildArenaSlots,
   canMergeUnits,
@@ -268,6 +269,9 @@ export class GameSimulation {
     towerDiscount: 0,
   };
   public selectedPet: PetKind = 'turtle';
+  public petChoiceUnlocked = false;
+  public petWasRandom = true;
+  private petLockedInForNextMatch = false;
   public petSwitchFlash = 0;
   private petRegenAccum = 0;
   private petCastleHpBonusApplied = 0;
@@ -286,8 +290,8 @@ export class GameSimulation {
   public ringRotation = 0;
   public ringHeat = 0;
   private bloodPactDrainAccum = 0;
-  public burnZones: { x: number; y: number; radius: number; life: number; damageTimer?: number }[] = [];
-  public acidStormZones: { x: number; y: number; radius: number; life: number; damage: number; damageTimer?: number }[] = [];
+  public burnZones: { x: number; y: number; radius: number; life: number; damageTimer?: number; sourceUnitId?: number }[] = [];
+  public acidStormZones: { x: number; y: number; radius: number; life: number; damage: number; damageTimer?: number; sourceUnitId?: number }[] = [];
 
   public get hero(): HeroEntity {
     return this.heroes[this.activeHeroIndex] ?? this.heroes[0];
@@ -301,10 +305,26 @@ export class GameSimulation {
     return PET_SPECS[this.selectedPet].itemDropLuckBonusPct;
   }
 
+  public unlockPetChoiceViaAd(): void {
+    this.petChoiceUnlocked = true;
+  }
+
+  public rollRandomPet(): PetKind {
+    const idx = Math.floor(Math.random() * PET_ORDER.length);
+    return PET_ORDER[idx] ?? 'turtle';
+  }
+
   public setSelectedPet(pet: PetKind): boolean {
     if (!PET_ORDER.includes(pet)) return false;
     const prevPet = this.selectedPet;
     this.selectedPet = pet;
+    this.petWasRandom = false;
+    if (this.phase === 'title') {
+      this.petLockedInForNextMatch = true;
+    } else {
+      // Consuming an in-match ad unlock on pet swap
+      this.petChoiceUnlocked = false;
+    }
     const nextSpec = PET_SPECS[pet];
 
     // Recalculate Castle Max HP cleanly when switching to/from Turtle without heal exploits
@@ -890,6 +910,19 @@ export class GameSimulation {
       overchargeTimer: 0,
     };
 
+    // Randomize Passive Guardian Pet on every match start unless explicitly chosen via simulated ad
+    if (targetPhase === 'playing') {
+      if (this.petLockedInForNextMatch || this.petChoiceUnlocked) {
+        this.petWasRandom = false;
+        this.petLockedInForNextMatch = false;
+        this.petChoiceUnlocked = false;
+      } else {
+        this.selectedPet = this.rollRandomPet();
+        this.petWasRandom = true;
+        this.petChoiceUnlocked = false;
+      }
+    }
+
     // Deploy persistent hero(es): ALL 3 on Convergence stages, or the chosen Main Hero on regular stages!
     this.heroes = [];
     this.activeHeroIndex = 0;
@@ -934,11 +967,24 @@ export class GameSimulation {
     this.baseMaxHp += this.petCastleHpBonusApplied;
     this.baseHp = this.baseMaxHp;
     this.petRegenAccum = 0;
-    this.petSwitchFlash = 0;
+    this.petSwitchFlash = targetPhase === 'playing' ? 0.9 : 0;
 
     this.startWave(1);
 
     if (targetPhase === 'playing') {
+      const petPos = computeCastlePetPosition(this.arena);
+      this.floatingTexts.push({
+        x: petPos.x,
+        y: petPos.y - 54,
+        vy: -20,
+        text: this.petWasRandom
+          ? `Pet Sorteado: ${petSpec.name}`
+          : `Pet Escolhido: ${petSpec.name}`,
+        color: petSpec.accentColor,
+        scale: 0.94,
+        life: 1.75,
+        maxLife: 1.75,
+      });
       const stageEnemyUnlock = getEnemyUnlockForStage(this.currentStage);
       const stageAllyUnlock = getAllyUnlockForStage(this.currentStage);
       const unlockedPool = getUnlockedEnemiesForStage(this.currentStage).filter((e) => !e.isBoss);
@@ -1267,6 +1313,9 @@ export class GameSimulation {
       recoil: 0,
       hitFlash: 0,
       level: 1,
+      xp: 0,
+      kills: 0,
+      levelUpFlash: 0,
     };
     this.recomputeUnitStats(unit);
 
@@ -1652,7 +1701,7 @@ export class GameSimulation {
     if (targetUnit && canMergeUnits(draggedUnit, targetUnit)) {
       fromSlot.unitId = null;
       this.units = this.units.filter((u) => u.id !== draggedUnit.id);
-      applyMergeUpgrade(targetUnit);
+      applyMergeUpgrade(targetUnit, draggedUnit.xp ?? 0, draggedUnit.kills ?? 0);
       this.recomputeUnitStats(targetUnit);
 
       this.mergesPerformed += 1;
@@ -2050,7 +2099,7 @@ export class GameSimulation {
         for (const enemy of this.enemies) {
           if (enemy.isDead) continue;
           if (distanceBetween(bz.x, bz.y, enemy.x, enemy.y) <= bz.radius + enemy.radius) {
-            this.handleEnemyDamaged(enemy, 10 + Math.round(this.currentStage * 0.4), 0, 0, false, false, undefined);
+            this.handleEnemyDamaged(enemy, 10 + Math.round(this.currentStage * 0.4), 0, 0, false, false, undefined, bz.sourceUnitId);
           }
         }
       }
@@ -2069,7 +2118,7 @@ export class GameSimulation {
           if (distanceBetween(az.x, az.y, enemy.x, enemy.y) <= az.radius + enemy.radius) {
             enemy.corrosionTimer = Math.max(enemy.corrosionTimer ?? 0, 2.5);
             enemy.slowTimer = Math.max(enemy.slowTimer ?? 0, 1.5);
-            this.handleEnemyDamaged(enemy, az.damage, 0, 0, true, false, undefined);
+            this.handleEnemyDamaged(enemy, az.damage, 0, 0, true, false, undefined, az.sourceUnitId);
           }
         }
       }
@@ -2273,6 +2322,7 @@ export class GameSimulation {
       unit.attackAnim = Math.max(0, unit.attackAnim - dt * 4);
       unit.recoil = Math.max(0, unit.recoil - dt * 6);
       unit.hitFlash = Math.max(0, unit.hitFlash - dt);
+      unit.levelUpFlash = Math.max(0, (unit.levelUpFlash ?? 0) - dt);
 
       if (unit.cooldownTimer <= 0) {
         const target = findNearestEnemyInRange(unit, this.enemies, this.arena);
@@ -2342,7 +2392,8 @@ export class GameSimulation {
             proj.vy * 0.04,
             proj.isShockwave || Boolean(proj.isPiercing),
             roll.isCrit,
-            ownerHeroClass ?? (proj.isHeroAttack ? this.hero.heroClass : undefined)
+            ownerHeroClass ?? (proj.isHeroAttack ? this.hero.heroClass : undefined),
+            proj.sourceUnitId
           );
           hit = true;
           if (proj.isPiercing) {
@@ -2665,6 +2716,7 @@ export class GameSimulation {
         targetEnemyId: target.id,
         life: 0.9,
         isShockwave: false,
+        sourceUnitId: unit.id,
       });
       soundEngine.playShoot();
     } else if (unit.kind === 'shield') {
@@ -2686,6 +2738,7 @@ export class GameSimulation {
         targetEnemyId: target.id,
         life: 0.55,
         isShockwave: true,
+        sourceUnitId: unit.id,
       });
       soundEngine.playShieldBash();
       this.spawnTypedParticles(unit.x + (dx / dist) * 18, unit.y + (dy / dist) * 18, 6, 'spark', '#00D4FF', 95, 0.3);
@@ -2713,7 +2766,7 @@ export class GameSimulation {
       for (const enemy of hitEnemies) {
         enemy.corrosionTimer = Math.max(enemy.corrosionTimer ?? 0, 4.5);
         const roll = rollCriticalHit(effectiveDamage, unit.critChance);
-        this.handleEnemyDamaged(enemy, roll.damage, 0, 0, true, roll.isCrit, undefined);
+        this.handleEnemyDamaged(enemy, roll.damage, 0, 0, true, roll.isCrit, undefined, unit.id);
       }
       this.spawnTypedParticles(
         unit.x + Math.cos(unit.facingAngle) * 44,
@@ -2749,7 +2802,7 @@ export class GameSimulation {
         const bossMult = enemy.kind === 'boss' || enemy.kind === 'titan' ? 1.35 : 1;
         const roll = rollCriticalHit(Math.round(effectiveDamage * bossMult), unit.critChance);
         const kb = computeRadialKnockbackVector(unit.x, unit.y, enemy.x, enemy.y, 48);
-        this.handleEnemyDamaged(enemy, roll.damage, kb.vx, kb.vy, true, roll.isCrit, undefined);
+        this.handleEnemyDamaged(enemy, roll.damage, kb.vx, kb.vy, true, roll.isCrit, undefined, unit.id);
       }
       this.spawnTypedParticles(unit.x + Math.cos(unit.facingAngle) * 40, unit.y + Math.sin(unit.facingAngle) * 40, 7, 'spark', '#FF2E4C', 135, 0.34);
     } else if (unit.kind === 'fire_mage') {
@@ -2773,9 +2826,10 @@ export class GameSimulation {
         isShockwave: false,
         isPiercing: true,
         hitIds: [],
+        sourceUnitId: unit.id,
       });
       if (this.burnZones.length < 12) {
-        this.burnZones.push({ x: target.x, y: target.y, radius: 58, life: 4.0 });
+        this.burnZones.push({ x: target.x, y: target.y, radius: 58, life: 4.0, sourceUnitId: unit.id });
       }
       soundEngine.playBombLaunch();
       this.spawnTypedParticles(unit.x + (dx / dist) * 18, unit.y + (dy / dist) * 18, 7, 'spark', '#F97316', 110, 0.3);
@@ -2798,6 +2852,7 @@ export class GameSimulation {
         targetEnemyId: target.id,
         life: 0.85,
         isShockwave: false,
+        sourceUnitId: unit.id,
       });
       if (this.baseHp < this.baseMaxHp) {
         const healAmount = 2 + unit.level;
@@ -2820,7 +2875,7 @@ export class GameSimulation {
         maxLife: 0.18,
         color: '#A855F7',
       });
-      this.handleEnemyDamaged(target, roll.damage, 0, 0, true, roll.isCrit, undefined);
+      this.handleEnemyDamaged(target, roll.damage, 0, 0, true, roll.isCrit, undefined, unit.id);
       soundEngine.playSlash();
       this.spawnTypedParticles(target.x, target.y, 8, 'spark', '#C084FC', 140, 0.3);
     } else if (unit.kind === 'sniper') {
@@ -2844,6 +2899,7 @@ export class GameSimulation {
         isShockwave: false,
         isPiercing: true,
         hitIds: [],
+        sourceUnitId: unit.id,
       });
       soundEngine.playArcherShot();
       this.spawnTypedParticles(unit.x + (dx / dist) * 22, unit.y + (dy / dist) * 22, 6, 'spark', '#06B6D4', 150, 0.25);
@@ -2865,7 +2921,7 @@ export class GameSimulation {
           const totalLen = this.routeTotalLengths[enemy.routeIndex] ?? this.routeTotalLength;
           pushEnemyBackAlongRoute(enemy, branch.waypoints, 48, totalLen);
           const roll = rollCriticalHit(effectiveDamage, unit.critChance);
-          this.handleEnemyDamaged(enemy, roll.damage, 0, 0, true, roll.isCrit, undefined);
+          this.handleEnemyDamaged(enemy, roll.damage, 0, 0, true, roll.isCrit, undefined, unit.id);
         }
       }
       this.spawnTypedParticles(unit.x, unit.y, 10, 'smoke', '#CBD5E1', 95, 0.4);
@@ -2890,6 +2946,7 @@ export class GameSimulation {
             life: 4.5,
             damage: Math.max(12, Math.round(effectiveDamage * 0.6)),
             damageTimer: 0.1,
+            sourceUnitId: unit.id,
           });
           this.burnZones.splice(bi, 1);
           this.floatingTexts.push({
@@ -2909,7 +2966,7 @@ export class GameSimulation {
         enemy.slowTimer = Math.max(enemy.slowTimer ?? 0, 3.2);
         if (distanceBetween(unit.x, unit.y, enemy.x, enemy.y) <= unit.range + enemy.radius) {
           const roll = rollCriticalHit(effectiveDamage, unit.critChance);
-          this.handleEnemyDamaged(enemy, roll.damage, 0, 0, false, roll.isCrit, undefined);
+          this.handleEnemyDamaged(enemy, roll.damage, 0, 0, false, roll.isCrit, undefined, unit.id);
         }
       }
       soundEngine.playSlash();
@@ -2937,7 +2994,7 @@ export class GameSimulation {
       for (const enemy of hitEnemies) {
         const roll = rollCriticalHit(effectiveDamage, unit.critChance);
         const kb = computeRadialKnockbackVector(unit.x, unit.y, enemy.x, enemy.y, 55);
-        this.handleEnemyDamaged(enemy, roll.damage, kb.vx, kb.vy, true, roll.isCrit, undefined);
+        this.handleEnemyDamaged(enemy, roll.damage, kb.vx, kb.vy, true, roll.isCrit, undefined, unit.id);
       }
       this.spawnTypedParticles(unit.x, unit.y, 10, 'spark', '#FEF08A', 150, 0.36);
     }
@@ -2950,7 +3007,8 @@ export class GameSimulation {
     knockY: number,
     heavy: boolean,
     isCrit: boolean,
-    attackerHeroClass: HeroClass | undefined
+    attackerHeroClass: HeroClass | undefined,
+    attackerUnitId?: number
   ) {
     const byHero = attackerHeroClass !== undefined;
     let adjustedDamage = damage;
@@ -3083,6 +3141,33 @@ export class GameSimulation {
               'electric',
               1.0
             );
+          }
+        }
+      }
+
+      // Per-stage Combat XP gain for the Allied Unit that scored the kill (resets on new stage)
+      if (attackerUnitId !== undefined) {
+        const killerUnit = this.units.find((u) => u.id === attackerUnitId);
+        if (killerUnit) {
+          killerUnit.kills = (killerUnit.kills ?? 0) + 1;
+          const gainedUnitXp = Math.max(4, Math.round(enemy.xpReward * overchargeMult));
+          const unitLvlRes = applyUnitXpGain(killerUnit, gainedUnitXp);
+          if (unitLvlRes.leveledUp) {
+            this.recomputeUnitStats(killerUnit);
+            this.maxUnitLevelReached = Math.max(this.maxUnitLevelReached, killerUnit.level);
+            soundEngine.playMerge();
+            this.spawnTypedParticles(killerUnit.x, killerUnit.y, 14, 'spark', '#FACC15', 145, 0.45);
+            this.spawnTypedParticles(killerUnit.x, killerUnit.y, 8, 'spark', '#00D4FF', 110, 0.4);
+            this.floatingTexts.push({
+              x: killerUnit.x,
+              y: killerUnit.y - 34,
+              vy: -36,
+              text: `${UNIT_SPECS[killerUnit.kind].name} Nv.${killerUnit.level}!`,
+              color: '#FACC15',
+              scale: 1.08,
+              life: 0.9,
+              maxLife: 0.9,
+            });
           }
         }
       }
@@ -3287,6 +3372,8 @@ export class GameSimulation {
       ringHeat: this.ringHeat,
       selectedPet: this.selectedPet,
       petDropLuckBonus: this.getItemDropLuckBonus(),
+      petChoiceUnlocked: this.petChoiceUnlocked,
+      petWasRandom: this.petWasRandom,
       enemyKillsByCatalogId: { ...this.enemyKillsByCatalogId },
       discoveredEnemyIds: [...this.discoveredEnemyIds],
       unlockedAchievements: [...this.unlockedAchievements],

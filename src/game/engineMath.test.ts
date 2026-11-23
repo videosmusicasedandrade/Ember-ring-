@@ -16,6 +16,7 @@ import {
   applyDamageToUnit,
   applyHeroXpGain,
   applyMergeUpgrade,
+  applyUnitXpGain,
   buildArenaForStage,
   buildArenaSlots,
   canMergeUnits,
@@ -39,7 +40,9 @@ import {
   getHeroRankTitle,
   getHeroStatsForLevel,
   getStageConfig,
+  getUnitLevelFromXp,
   getUnitStatsForLevel,
+  getUnitXpBounds,
   isValidFreeHeroPosition,
   isEliteEnemy,
   pointToSegmentDistance,
@@ -60,6 +63,7 @@ import {
   PET_SPECS,
   TOTAL_STAGES,
   UNIT_SPECS,
+  UNIT_XP_THRESHOLDS,
   UnitEntity,
 } from './types';
 
@@ -833,5 +837,143 @@ test('GameSimulation.setSelectedPet instantly updates all 5 passive guardian bon
   assert.ok(sim.getSpellCooldownMultiplier() < baseSpellMult, 'Owl should reduce spell cooldown multiplier');
   assert.equal(sim.getHudSnapshot().petDropLuckBonus, 0);
 });
+
+test('Allied units earn XP from their own kills, level up linearly, and reset to scratch on new stage while Heroes persist', () => {
+  // Pure XP helper checks
+  assert.equal(getUnitLevelFromXp(0), 1);
+  assert.equal(getUnitLevelFromXp(UNIT_XP_THRESHOLDS[1]), 2);
+  assert.equal(getUnitLevelFromXp(99999), MAX_UNIT_LEVEL);
+  const boundsLv1 = getUnitXpBounds(1);
+  assert.equal(boundsLv1.currentFloor, 0);
+  assert.equal(boundsLv1.nextThreshold, UNIT_XP_THRESHOLDS[1]);
+
+  const u = makeUnit({
+    id: 99,
+    kind: 'scout',
+    level: 1,
+    damage: UNIT_SPECS.scout.damage,
+    maxHp: UNIT_SPECS.scout.maxHp,
+    hp: UNIT_SPECS.scout.maxHp,
+    xp: 0,
+    kills: 0,
+  });
+  const baseDmg = u.damage;
+  const r1 = applyUnitXpGain(u, UNIT_XP_THRESHOLDS[1] - 5);
+  assert.equal(r1.leveledUp, false);
+  assert.equal(u.level, 1);
+
+  const r2 = applyUnitXpGain(u, 10);
+  assert.equal(r2.leveledUp, true);
+  assert.equal(r2.newLevel, 2);
+  assert.ok(u.damage > baseDmg, 'Allied unit damage should increase upon leveling up from XP');
+
+  // Full simulation: an ally kills enemies -> earns XP & levels up; then starting a new stage resets allies while Hero persists
+  const sim = new GameSimulation();
+  sim.resetWorld('playing', 1, 'archer');
+  sim.essence = 500;
+  assert.equal(sim.quickRecruitUnit('swordsman_ally'), true);
+  const ally = sim.units[0];
+  assert.equal(ally.level, 1);
+  assert.equal(ally.xp, 0);
+
+  // Boost hero XP so hero levels up above Lv.1
+  sim.hero.xp = HERO_XP_THRESHOLDS[3] + 5;
+  sim.hero.level = 4;
+  sim.heroRoster.archer.level = 4;
+  sim.heroRoster.archer.xp = sim.hero.xp;
+
+  // Place low-HP enemies right next to the allied swordsman so the ally scores the kills
+  const killsNeeded = 4;
+  for (let k = 0; k < killsNeeded; k++) {
+    sim.enemies.push({
+      id: 9000 + k,
+      kind: 'walker',
+      x: ally.x + 25,
+      y: ally.y,
+      vx: 0,
+      vy: 0,
+      radius: 16,
+      hp: 1,
+      maxHp: 1,
+      speed: 0,
+      damage: 1,
+      attackCooldown: 10,
+      attackTimer: 10,
+      attackAnim: 0,
+      rewardEssence: 10,
+      rewardScore: 20,
+      xpReward: 20,
+      walkPhase: 0,
+      distanceTraveled: 0,
+      routeIndex: 0,
+      waypointIndex: 1,
+      laneOffset: 0,
+      pathProgress: 0.5,
+      hitFlash: 0,
+      knockbackVx: 0,
+      knockbackVy: 0,
+      stunTimer: 0,
+      koTimer: 0,
+      isDead: false,
+      bracingTimer: 0,
+      lungeTimer: 0,
+      lungeCooldown: 0,
+    });
+  }
+  // Keep hero on cooldown so the ally definitely gets the kills
+  sim.hero.cooldownTimer = 10;
+  ally.cooldownTimer = 0;
+  const allyDmgBefore = ally.damage;
+
+  sim.update(0.05);
+
+  assert.ok((ally.kills ?? 0) >= 4, `Ally should be credited for kills, got ${ally.kills}`);
+  assert.ok((ally.xp ?? 0) >= 80, `Ally should earn XP from kills, got ${ally.xp}`);
+  assert.ok(ally.level >= 2, `Ally should level up from kill XP, got Lv.${ally.level}`);
+  assert.ok(ally.damage > allyDmgBefore, 'Ally should grow stronger after leveling up from kills');
+
+  const persistedHeroLevel = sim.hero.level;
+  assert.ok(persistedHeroLevel >= 4, 'Hero should have persistent level before stage change');
+
+  // Start a new stage: allies reset completely to scratch, while Hero keeps its level!
+  sim.resetWorld('playing', 2, 'archer');
+  assert.equal(sim.units.length, 0, 'Allied units must be cleared at start of new stage');
+  assert.equal(sim.maxUnitLevelReached, 1, 'Max allied unit level resets on new stage');
+  assert.equal(sim.hero.level, persistedHeroLevel, 'Hero must retain its level on the new stage');
+
+  sim.essence = 500;
+  assert.equal(sim.quickRecruitUnit('swordsman_ally'), true);
+  assert.equal(sim.units[0].level, 1, 'Newly deployed ally in new stage must start back at Level 1');
+  assert.equal(sim.units[0].xp, 0, 'Newly deployed ally in new stage must start back at 0 XP');
+});
+
+test('Match start assigns a random pet by default, while watching simulated ad unlocks manual choice for that match', () => {
+  const sim = new GameSimulation();
+  assert.equal(sim.petChoiceUnlocked, false);
+
+  // Start without watching ad -> pet is assigned randomly from PET_ORDER
+  sim.resetWorld('playing', 1, 'archer');
+  assert.equal(sim.petWasRandom, true);
+  assert.ok(PET_ORDER.includes(sim.selectedPet));
+  assert.equal(sim.getHudSnapshot().petWasRandom, true);
+  assert.equal(sim.getHudSnapshot().petChoiceUnlocked, false);
+
+  // Return to title, watch simulated ad, pick Owl -> next match uses Owl and consumes unlock
+  sim.resetWorld('title', 1, 'archer');
+  sim.unlockPetChoiceViaAd();
+  assert.equal(sim.getHudSnapshot().petChoiceUnlocked, true);
+  sim.setSelectedPet('owl');
+  sim.resetWorld('playing', 2, 'archer');
+  assert.equal(sim.selectedPet, 'owl');
+  assert.equal(sim.petWasRandom, false);
+  assert.equal(sim.petChoiceUnlocked, false, 'Ad unlock must be consumed after match starts');
+
+  // Starting another match without watching a new ad rolls randomly again
+  sim.resetWorld('playing', 3, 'archer');
+  assert.equal(sim.petWasRandom, true);
+  assert.ok(PET_ORDER.includes(sim.selectedPet));
+});
+
+
 
 

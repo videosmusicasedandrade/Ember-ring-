@@ -18,6 +18,7 @@ import {
   StageRouteDefinition,
   TOTAL_STAGES,
   UNIT_SPECS,
+  UNIT_XP_THRESHOLDS,
   UnitEntity,
 } from './types';
 
@@ -1653,17 +1654,83 @@ export function getUnitStatsForLevel(
   };
 }
 
-export function applyMergeUpgrade(target: UnitEntity): UnitEntity {
+export function getUnitLevelFromXp(xp: number): number {
+  const safeXp = Math.max(0, xp);
+  let lvl = 1;
+  for (let i = 1; i < UNIT_XP_THRESHOLDS.length; i++) {
+    if (safeXp >= UNIT_XP_THRESHOLDS[i]) {
+      lvl = i + 1;
+    }
+  }
+  return Math.min(MAX_UNIT_LEVEL, lvl);
+}
+
+export function getUnitXpBounds(level: number): { currentFloor: number; nextThreshold: number } {
+  const clamped = Math.max(1, Math.min(MAX_UNIT_LEVEL, level));
+  const currentFloor = UNIT_XP_THRESHOLDS[clamped - 1] ?? 0;
+  const nextThreshold =
+    clamped >= MAX_UNIT_LEVEL
+      ? currentFloor
+      : UNIT_XP_THRESHOLDS[clamped] ?? currentFloor + 100;
+  return { currentFloor, nextThreshold };
+}
+
+export function applyUnitXpGain(
+  unit: UnitEntity,
+  gainedXp: number
+): { leveledUp: boolean; previousLevel: number; newLevel: number; isMaxReached: boolean } {
+  const prev = unit.level;
+  unit.xp = (unit.xp ?? 0) + Math.max(0, gainedXp);
+  const xpLevel = getUnitLevelFromXp(unit.xp);
+  const nextLevel = Math.min(MAX_UNIT_LEVEL, Math.max(prev, xpLevel));
+
+  if (nextLevel > prev) {
+    const prevMaxHp = unit.maxHp;
+    const scaled = getUnitStatsForLevel(unit.kind, nextLevel);
+    unit.level = nextLevel;
+    unit.damage = scaled.damage;
+    unit.maxHp = scaled.maxHp;
+    unit.hp = Math.min(scaled.maxHp, unit.hp + Math.max(0, scaled.maxHp - prevMaxHp));
+    unit.cooldown = scaled.cooldown;
+    unit.range = scaled.range;
+    unit.critChance = scaled.critChance;
+    unit.levelUpFlash = 1.0;
+    unit.attackAnim = 1;
+    return {
+      leveledUp: true,
+      previousLevel: prev,
+      newLevel: nextLevel,
+      isMaxReached: nextLevel >= MAX_UNIT_LEVEL,
+    };
+  }
+
+  return {
+    leveledUp: false,
+    previousLevel: prev,
+    newLevel: prev,
+    isMaxReached: prev >= MAX_UNIT_LEVEL,
+  };
+}
+
+export function applyMergeUpgrade(
+  target: UnitEntity,
+  sourceXp = 0,
+  sourceKills = 0
+): UnitEntity {
   const nextLevel = Math.min(MAX_UNIT_LEVEL, target.level + 1);
   const scaled = getUnitStatsForLevel(target.kind, nextLevel);
+  const nextFloorXp = UNIT_XP_THRESHOLDS[nextLevel - 1] ?? 0;
 
   target.level = nextLevel;
+  target.xp = Math.max(nextFloorXp, (target.xp ?? 0) + Math.round(Math.max(0, sourceXp) * 0.5));
+  target.kills = (target.kills ?? 0) + Math.max(0, sourceKills);
   target.damage = scaled.damage;
   target.maxHp = scaled.maxHp;
   target.hp = target.maxHp;
   target.cooldown = scaled.cooldown;
   target.range = scaled.range;
   target.critChance = scaled.critChance;
+  target.levelUpFlash = 1.0;
   target.attackAnim = 1;
   return target;
 }

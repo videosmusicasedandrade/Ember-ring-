@@ -3,6 +3,7 @@ import {
   ChevronDown,
   ChevronUp,
   Crosshair,
+  Lock,
   Move,
   Music,
   Pause,
@@ -11,6 +12,7 @@ import {
   Shield,
   Sparkles,
   Swords,
+  Tv,
   Volume2,
   VolumeX,
   Zap,
@@ -41,6 +43,7 @@ interface GameHUDProps {
   onToggleHeroReposition: () => void;
   onSelectActiveHero: (index: number) => void;
   onSelectPet: (pet: PetKind) => void;
+  onRequestPetAd: (targetPet?: PetKind) => void;
   onActivateSpell: (kind: SpellKind) => void;
   onTogglePause: () => void;
   onToggleMuteMusic: () => void;
@@ -98,6 +101,7 @@ export const GameHUD: React.FC<GameHUDProps> = ({
   onToggleHeroReposition,
   onSelectActiveHero,
   onSelectPet,
+  onRequestPetAd,
   onActivateSpell,
   onTogglePause,
   onToggleMuteMusic,
@@ -504,7 +508,7 @@ export const GameHUD: React.FC<GameHUDProps> = ({
                 <div className="flex items-center gap-1 whitespace-nowrap text-[11px] font-bold text-white">
                   <span>{activePet.name}</span>
                   <span className="text-[9px] font-semibold uppercase tracking-wide text-[#94A3B8]">
-                    Pet
+                    {hud.petWasRandom ? 'Sorteado' : 'Escolhido'}
                   </span>
                 </div>
                 <div
@@ -523,15 +527,36 @@ export const GameHUD: React.FC<GameHUDProps> = ({
             {petPickerOpen && (
               <div
                 data-testid="hud-pet-picker"
-                className="flex w-[256px] flex-col gap-1 rounded-2xl border-2 border-[#334155] bg-[#0A1124]/96 p-2 shadow-[0_12px_28px_rgba(0,0,0,0.85)] backdrop-blur-md"
+                className="flex w-[264px] flex-col gap-1.5 rounded-2xl border-2 border-[#334155] bg-[#0A1124]/96 p-2.5 shadow-[0_12px_28px_rgba(0,0,0,0.85)] backdrop-blur-md"
               >
-                <div className="flex items-center justify-between px-1 pb-1 text-[10px] font-bold uppercase tracking-wider text-[#94A3B8]">
-                  <span>Trocar Guardião Passivo</span>
-                  <span className="text-[#FACC15]">Ao Vivo</span>
+                <div className="flex items-center justify-between px-1 text-[10px] font-bold uppercase tracking-wider text-[#94A3B8]">
+                  <span>{hud.petChoiceUnlocked ? 'Escolher Novo Pet' : 'Pet Guardião'}</span>
+                  <span className={hud.petChoiceUnlocked ? 'text-[#22C55E]' : 'text-[#FACC15]'}>
+                    {hud.petChoiceUnlocked ? 'Liberado' : 'Anúncio p/ trocar'}
+                  </span>
                 </div>
+
+                {!hud.petChoiceUnlocked && (
+                  <button
+                    type="button"
+                    tabIndex={-1}
+                    data-testid="hud-pet-watch-ad"
+                    onClick={(e) => {
+                      e.currentTarget.blur();
+                      soundEngine.playClick();
+                      onRequestPetAd();
+                    }}
+                    className="font-display flex items-center justify-center gap-1.5 rounded-xl border border-[#FEF08A] bg-gradient-to-r from-[#FF2E4C] to-[#F59E0B] px-2.5 py-1.5 text-xs font-bold whitespace-nowrap text-white shadow-[0_2px_0_#991B1B] active:translate-y-0.5"
+                  >
+                    <Tv className="h-3.5 w-3.5 shrink-0" />
+                    <span>Ver Anúncio para Trocar</span>
+                  </button>
+                )}
+
                 {PET_ORDER.map((petKind) => {
                   const spec = PET_SPECS[petKind];
                   const isActive = hud.selectedPet === petKind;
+                  const locked = !hud.petChoiceUnlocked && !isActive;
                   return (
                     <button
                       key={petKind}
@@ -542,13 +567,24 @@ export const GameHUD: React.FC<GameHUDProps> = ({
                       onClick={(e) => {
                         e.currentTarget.blur();
                         soundEngine.playClick();
-                        onSelectPet(petKind);
-                        setPetPickerOpen(false);
+                        if (isActive) {
+                          setPetPickerOpen(false);
+                          return;
+                        }
+                        if (hud.petChoiceUnlocked) {
+                          onSelectPet(petKind);
+                          setPetPickerOpen(false);
+                        } else {
+                          setPetPickerOpen(false);
+                          onRequestPetAd(petKind);
+                        }
                       }}
                       className={`flex items-center gap-2 rounded-xl border px-2 py-1.5 text-left transition-colors ${
                         isActive
                           ? 'bg-[#162033]'
-                          : 'border-[#1E293B] bg-[#080D1A]/90 hover:border-[#475569] hover:bg-[#111B2E]'
+                          : locked
+                            ? 'border-[#1E293B] bg-[#080D1A]/75 opacity-85 hover:border-[#FACC15]/70 hover:opacity-100'
+                            : 'border-[#1E293B] bg-[#080D1A]/90 hover:border-[#475569] hover:bg-[#111B2E]'
                       }`}
                       style={
                         isActive
@@ -564,8 +600,9 @@ export const GameHUD: React.FC<GameHUDProps> = ({
                       </div>
                       <div className="min-w-0 flex-1 leading-tight">
                         <div className="flex items-center justify-between gap-1">
-                          <span className="font-display text-xs font-bold text-white">
-                            {spec.name}
+                          <span className="flex items-center gap-1 font-display text-xs font-bold text-white">
+                            <span>{spec.name}</span>
+                            {locked && <Lock className="h-3 w-3 text-[#FACC15]" />}
                           </span>
                           <span
                             className="font-mono-tabular text-[10px] font-bold"

@@ -411,9 +411,13 @@ export const HERO_UPGRADE_CATALOG: Record<HeroUpgradeId, HeroUpgradeOption> = {
   },
 };
 
-export const MAX_UNIT_LEVEL = 4;
+export const MAX_UNIT_LEVEL = 10;
 export const MAX_HERO_LEVEL = 30;
 export const TOTAL_STAGES = 150;
+
+export const UNIT_XP_THRESHOLDS: ReadonlyArray<number> = [
+  0, 45, 110, 195, 305, 440, 600, 790, 1010, 1260,
+];
 
 export const HERO_XP_THRESHOLDS: ReadonlyArray<number> = [
   0, 14, 32, 55, 84, 120, 165, 220, 285, 360,
@@ -584,6 +588,9 @@ export interface UnitEntity {
   recoil: number;
   hitFlash: number;
   level: number;
+  xp?: number;
+  kills?: number;
+  levelUpFlash?: number;
 }
 
 export interface EnemyEntity {
@@ -649,6 +656,7 @@ export interface ProjectileEntity {
   appliesSlow?: boolean;
   appliesCorrosion?: boolean;
   isHeroAttack?: boolean;
+  sourceUnitId?: number;
   isBomb?: boolean;
   blastRadius?: number;
   startX?: number;
@@ -858,6 +866,8 @@ export interface HudSnapshot {
   ringHeat: number;
   selectedPet: PetKind;
   petDropLuckBonus: number;
+  petChoiceUnlocked: boolean;
+  petWasRandom: boolean;
   enemyKillsByCatalogId: Record<number, number>;
   discoveredEnemyIds: number[];
   unlockedAchievements: string[];

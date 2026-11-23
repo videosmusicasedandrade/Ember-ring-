@@ -1,6 +1,7 @@
 import {
   canMergeUnits,
   computeCastlePetPosition,
+  getUnitXpBounds,
   isEliteEnemy,
   isValidFreeHeroPosition,
   pointToSegmentDistance,
@@ -2184,6 +2185,48 @@ export class ArenaRenderer {
       time,
       unit.id
     );
+
+    // Expanding level-up ring pulse when an ally levels up from kills or merge
+    const flash = unit.levelUpFlash ?? 0;
+    if (flash > 0) {
+      const t = 1 - Math.min(1, flash);
+      ctx.save();
+      ctx.strokeStyle = `rgba(250, 204, 21, ${(1 - t) * 0.9})`;
+      ctx.lineWidth = 2.6;
+      ctx.beginPath();
+      ctx.arc(unit.x, unit.y - 2, 16 + t * 24, 0, Math.PI * 2);
+      ctx.stroke();
+      ctx.restore();
+    }
+
+    // Subtle per-stage XP progress bar under allied units that have earned XP or leveled up
+    const unitXp = unit.xp ?? 0;
+    if (unitXp > 0 || unit.level > 1) {
+      const isMax = unit.level >= MAX_UNIT_LEVEL;
+      const bounds = getUnitXpBounds(unit.level);
+      const span = Math.max(1, bounds.nextThreshold - bounds.currentFloor);
+      const pct = isMax
+        ? 1
+        : Math.max(0, Math.min(1, (unitXp - bounds.currentFloor) / span));
+      const barW = 28;
+      const barH = 3.5;
+      const bx = unit.x - barW / 2;
+      const by = unit.y + 22;
+
+      ctx.save();
+      ctx.fillStyle = 'rgba(2, 6, 23, 0.85)';
+      ctx.beginPath();
+      ctx.roundRect(bx - 1, by - 1, barW + 2, barH + 2, 2);
+      ctx.fill();
+
+      ctx.fillStyle = isMax ? '#FACC15' : '#00D4FF';
+      if (pct > 0) {
+        ctx.beginPath();
+        ctx.roundRect(bx, by, Math.max(2, barW * pct), barH, 1.5);
+        ctx.fill();
+      }
+      ctx.restore();
+    }
   }
 
   private drawUnitSprite(
@@ -2200,7 +2243,7 @@ export class ArenaRenderer {
     seed: number
   ) {
     const idleBob = Math.sin(time * 3.8 + seed) * 1.4;
-    const levelScale = 1 + (level - 1) * 0.09;
+    const levelScale = 1 + Math.min(4, level - 1) * 0.08;
     const scaleX = (1 + recoil * 0.16) * levelScale;
     const scaleY = (1 - recoil * 0.14) * levelScale;
     const faceRight = Math.cos(facingAngle) >= 0;

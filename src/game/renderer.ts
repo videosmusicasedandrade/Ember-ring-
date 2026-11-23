@@ -10,6 +10,7 @@ import { GameSimulation } from './simulation';
 import {
   ArenaConfig,
   EnemyEntity,
+  FX_STYLES,
   HERO_SPECS,
   HeroClass,
   HeroEntity,
@@ -304,22 +305,45 @@ export class ArenaRenderer {
 
     ctx.drawImage(staticLayer, 0, 0);
 
-    // 0.5 Modular Ember Ring Visual Guide & Elemental Ground Zones
-    if (sim.ringRotation !== 0 || sim.ringHeat > 0.01) {
-      const skin = RING_SKINS[sim.equippedRingSkin] ?? RING_SKINS.classic;
+    // 0.5 Modular Ember Ring Visual Guide & Rare Ring Skin Arcane Circle
+    const skin = RING_SKINS[sim.equippedRingSkin] ?? RING_SKINS.classic;
+    const isCustomRingSkin = sim.equippedRingSkin !== 'classic';
+    if (sim.ringRotation !== 0 || sim.ringHeat > 0.01 || isCustomRingSkin) {
       ctx.save();
       ctx.translate(arena.centerX, arena.centerY);
-      ctx.rotate(sim.ringRotation);
+      ctx.rotate(sim.ringRotation + (isCustomRingSkin ? sim.time * 0.14 : 0));
       ctx.strokeStyle =
         sim.ringHeat > 0.75
-          ? 'rgba(255, 46, 76, 0.42)'
+          ? 'rgba(255, 46, 76, 0.48)'
           : skin.glowColor;
-      ctx.lineWidth = 2.8;
+      ctx.lineWidth = isCustomRingSkin ? 3.2 : 2.8;
       ctx.setLineDash([12, 10]);
       ctx.beginPath();
       ctx.arc(0, 0, 210, 0, Math.PI * 2);
       ctx.stroke();
       ctx.setLineDash([]);
+
+      if (isCustomRingSkin) {
+        ctx.globalAlpha = 0.42;
+        ctx.strokeStyle = skin.secondaryColor;
+        ctx.lineWidth = 1.6;
+        ctx.beginPath();
+        ctx.arc(0, 0, 196, 0, Math.PI * 2);
+        ctx.stroke();
+
+        // Subtle orbiting rune nodes for rare/milestone Ring Skins
+        ctx.globalAlpha = 0.72;
+        ctx.fillStyle = skin.runeColor;
+        const runeCount = skin.milestoneLevel ? 8 : 6;
+        for (let r = 0; r < runeCount; r++) {
+          const a = (r / runeCount) * Math.PI * 2;
+          const rx = Math.cos(a) * 210;
+          const ry = Math.sin(a) * 210;
+          ctx.beginPath();
+          ctx.arc(rx, ry, skin.milestoneLevel ? 3.4 : 2.6, 0, Math.PI * 2);
+          ctx.fill();
+        }
+      }
       ctx.restore();
     }
 
@@ -642,7 +666,9 @@ export class ArenaRenderer {
       }
     }
 
-    // 7. Crescent Slash Arcs
+    // 7. Crescent Slash Arcs (tinted by equipped FX Style when non-standard)
+    const activeFx = FX_STYLES[sim.equippedFxStyle] ?? FX_STYLES.standard;
+    const useCustomFx = sim.equippedFxStyle !== 'standard';
     for (const slash of sim.slashes) {
       const progress = 1 - slash.life / slash.maxLife;
       const alpha = Math.max(0, 1 - progress);
@@ -651,7 +677,7 @@ export class ArenaRenderer {
       ctx.rotate(slash.angle);
       ctx.globalAlpha = alpha;
 
-      ctx.strokeStyle = slash.color;
+      ctx.strokeStyle = useCustomFx ? activeFx.slashTint : slash.color;
       ctx.lineWidth = 16 * (1 - progress * 0.45);
       ctx.lineCap = 'round';
       ctx.beginPath();
@@ -702,7 +728,7 @@ export class ArenaRenderer {
         ctx.fill();
         ctx.stroke();
       } else {
-        ctx.fillStyle = proj.trailColor;
+        ctx.fillStyle = useCustomFx ? activeFx.projectileTint : proj.trailColor;
         ctx.beginPath();
         ctx.arc(
           proj.x - proj.vx * 0.015,

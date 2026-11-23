@@ -39,7 +39,47 @@ import {
   rollCriticalHit,
   unlockNextStage,
 } from './engineMath';
+import {
+  computeMissionDifficultyTier,
+  DAILY_ALL_COMPLETE_BONUS_GEMS,
+  DAILY_ALL_COMPLETE_BONUS_KEYS,
+  DailyMissionKind,
+  DailyMissionState,
+  generateDailyMissions,
+} from './dailyMissions';
+import {
+  computeMilestonePassiveBonuses,
+  getPlayerLevelFromXp,
+  getPlayerXpBounds,
+  getUnclaimedReadyMilestonesCount,
+  MILESTONE_CATALOG,
+  MilestonePassiveBonuses,
+  MilestoneRewardType,
+} from './milestones';
 import { createDefaultHeroRoster, loadProgress, saveProgress } from './storage';
+import {
+  ChestPullResult,
+  computeEquippedRelicBonuses,
+  CONSUMABLE_SPECS,
+  ConsumableId,
+  createPlayStoreSandboxReceipt,
+  EquippedRelicBonuses,
+  getPlayStoreProduct,
+  getSeasonPassTierFromXp,
+  getTodayDateKey,
+  MAX_EQUIPPED_RELICS,
+  PlayStoreSkuId,
+  PurchaseReceipt,
+  RELIC_CHEST_FIVE_COST,
+  RELIC_CHEST_SINGLE_COST,
+  RELIC_ORDER,
+  RELIC_SPECS,
+  RelicId,
+  rollRelicFromChest,
+  SEASON_PASS_TIERS,
+  SOULS_BUNDLE_AMOUNT,
+  SOULS_BUNDLE_GEM_COST,
+} from './storeCatalog';
 import {
   ACHIEVEMENT_CATALOG,
   ArenaConfig,
@@ -257,7 +297,31 @@ export class GameSimulation {
     this.equippedRingSkin = saved.equippedRingSkin ?? 'classic';
     this.equippedFxStyle = saved.equippedFxStyle ?? 'standard';
     this.totalLifetimeKills = saved.totalLifetimeKills ?? 0;
+    this.gems = saved.gems ?? 60;
+    this.chestKeys = saved.chestKeys ?? 1;
+    this.vipNoAds = Boolean(saved.vipNoAds);
+    this.starterPackClaimed = Boolean(saved.starterPackClaimed);
+    this.seasonPassPremium = Boolean(saved.seasonPassPremium);
+    this.seasonPassXp = saved.seasonPassXp ?? 0;
+    this.claimedFreePassTiers = saved.claimedFreePassTiers ?? [];
+    this.claimedPremiumPassTiers = saved.claimedPremiumPassTiers ?? [];
+    this.ownedRelics = saved.ownedRelics ?? {};
+    this.equippedRelics = saved.equippedRelics ?? [];
+    this.consumables = saved.consumables ?? { castle_potion: 1, meteor_scroll: 1, frenzy_flask: 1 };
+    this.dailyRewardLastClaimDate = saved.dailyRewardLastClaimDate ?? '';
+    this.purchaseHistory = saved.purchaseHistory ?? [];
+    this.dailyMissionsDate = saved.dailyMissionsDate ?? '';
+    this.dailyMissions = Array.isArray(saved.dailyMissions) ? saved.dailyMissions : [];
+    this.dailyAllCompleteBonusDate = saved.dailyAllCompleteBonusDate ?? '';
+    this.instagramBonusClaimedDate = saved.instagramBonusClaimedDate ?? '';
+    this.playerXp = saved.playerXp ?? 0;
+    this.claimedMilestoneLevels = saved.claimedMilestoneLevels ?? [];
+    if (this.vipNoAds) {
+      this.petChoiceUnlocked = true;
+      this.petWasRandom = false;
+    }
     this.heroes = [this.createHeroFromRoster(this.selectedHeroClass, 's1-5', 545, 295)];
+    this.ensureDailyMissionsForToday();
     this.resetWorld('title', 1, this.selectedHeroClass);
   }
 
@@ -275,6 +339,32 @@ export class GameSimulation {
   public petSwitchFlash = 0;
   private petRegenAccum = 0;
   private petCastleHpBonusApplied = 0;
+
+  public gems = 60;
+  public chestKeys = 1;
+  public vipNoAds = false;
+  public starterPackClaimed = false;
+  public seasonPassPremium = false;
+  public seasonPassXp = 0;
+  public claimedFreePassTiers: number[] = [];
+  public claimedPremiumPassTiers: number[] = [];
+  public ownedRelics: Record<string, number> = {};
+  public equippedRelics: string[] = [];
+  public consumables: Record<string, number> = {
+    castle_potion: 1,
+    meteor_scroll: 1,
+    frenzy_flask: 1,
+  };
+  public dailyRewardLastClaimDate = '';
+  public purchaseHistory: PurchaseReceipt[] = [];
+  public dailyMissionsDate = '';
+  public dailyMissions: DailyMissionState[] = [];
+  public dailyAllCompleteBonusDate = '';
+  public instagramBonusClaimedDate = '';
+  public playerXp = 0;
+  public claimedMilestoneLevels: number[] = [];
+  public frenzyTimer = 0;
+  private phoenixShieldUsed = false;
 
   public enemyKillsByCatalogId: Record<number, number> = {};
   public discoveredEnemyIds: number[] = [1];
@@ -321,8 +411,8 @@ export class GameSimulation {
     this.petWasRandom = false;
     if (this.phase === 'title') {
       this.petLockedInForNextMatch = true;
-    } else {
-      // Consuming an in-match ad unlock on pet swap
+    } else if (!this.vipNoAds) {
+      // Consuming an in-match ad unlock on pet swap (VIP stays permanently unlocked)
       this.petChoiceUnlocked = false;
     }
     const nextSpec = PET_SPECS[pet];
@@ -373,6 +463,8 @@ export class GameSimulation {
     if (!skin) return false;
     const key = `ring:${skinId}`;
     if (!this.unlockedCosmetics.includes(key)) {
+      // Milestone-exclusive Ring Skins can only be unlocked via Player Milestones
+      if (skin.milestoneLevel !== undefined) return false;
       if (this.emberSouls < skin.cost) return false;
       this.emberSouls -= skin.cost;
       this.unlockedCosmetics.push(key);
@@ -388,6 +480,8 @@ export class GameSimulation {
     if (!fx) return false;
     const key = `fx:${fxId}`;
     if (!this.unlockedCosmetics.includes(key)) {
+      // Milestone-exclusive FX Styles can only be unlocked via Player Milestones
+      if (fx.milestoneLevel !== undefined) return false;
       if (this.emberSouls < fx.cost) return false;
       this.emberSouls -= fx.cost;
       this.unlockedCosmetics.push(key);
@@ -462,7 +556,617 @@ export class GameSimulation {
       equippedFxStyle: this.equippedFxStyle,
       totalLifetimeKills: this.totalLifetimeKills,
       selectedPet: this.selectedPet,
+      gems: this.gems,
+      chestKeys: this.chestKeys,
+      vipNoAds: this.vipNoAds,
+      starterPackClaimed: this.starterPackClaimed,
+      seasonPassPremium: this.seasonPassPremium,
+      seasonPassXp: this.seasonPassXp,
+      claimedFreePassTiers: this.claimedFreePassTiers,
+      claimedPremiumPassTiers: this.claimedPremiumPassTiers,
+      ownedRelics: this.ownedRelics,
+      equippedRelics: this.equippedRelics,
+      consumables: this.consumables,
+      dailyRewardLastClaimDate: this.dailyRewardLastClaimDate,
+      purchaseHistory: this.purchaseHistory,
+      dailyMissionsDate: this.dailyMissionsDate,
+      dailyMissions: this.dailyMissions,
+      dailyAllCompleteBonusDate: this.dailyAllCompleteBonusDate,
+      instagramBonusClaimedDate: this.instagramBonusClaimedDate,
+      playerXp: this.playerXp,
+      claimedMilestoneLevels: this.claimedMilestoneLevels,
     });
+  }
+
+  public getRelicBonuses(): EquippedRelicBonuses {
+    return computeEquippedRelicBonuses(this.ownedRelics, this.equippedRelics);
+  }
+
+  private recomputeAllCombatantStats() {
+    for (const h of this.heroes) {
+      this.applySavedStatsToHero(h);
+    }
+    for (const u of this.units) {
+      this.recomputeUnitStats(u);
+    }
+  }
+
+  public purchasePlayStoreProduct(sku: PlayStoreSkuId): {
+    ok: boolean;
+    receipt?: PurchaseReceipt;
+    message: string;
+  } {
+    const product = getPlayStoreProduct(sku);
+    if (!product) {
+      return { ok: false, message: 'Produto não encontrado no catálogo.' };
+    }
+    if (product.sku === 'com.emberring.vip_no_ads' && this.vipNoAds) {
+      return { ok: false, message: 'Passe VIP já está ativo nesta conta.' };
+    }
+    if (product.sku === 'com.emberring.starter_pack' && this.starterPackClaimed) {
+      return { ok: false, message: 'Pacote Iniciante já foi resgatado.' };
+    }
+    if (product.sku === 'com.emberring.season_pass' && this.seasonPassPremium) {
+      return { ok: false, message: 'Passe de Temporada Premium já está ativo.' };
+    }
+
+    const r = product.rewards;
+    if (r.gems) this.gems += r.gems;
+    if (r.emberSouls) this.emberSouls += r.emberSouls;
+    if (r.chestKeys) this.chestKeys += r.chestKeys;
+    if (r.consumables) {
+      for (const [k, qty] of Object.entries(r.consumables)) {
+        if (qty && qty > 0) {
+          this.consumables[k] = (this.consumables[k] ?? 0) + qty;
+        }
+      }
+    }
+    if (r.vipNoAds) {
+      this.vipNoAds = true;
+      this.petChoiceUnlocked = true;
+      this.petWasRandom = false;
+    }
+    if (product.sku === 'com.emberring.starter_pack') {
+      this.starterPackClaimed = true;
+    }
+    if (r.seasonPassPremium) {
+      this.seasonPassPremium = true;
+    }
+    if (r.unlockRingSkin) {
+      const key = `ring:${r.unlockRingSkin}`;
+      if (!this.unlockedCosmetics.includes(key)) {
+        this.unlockedCosmetics.push(key);
+      }
+      this.equippedRingSkin = r.unlockRingSkin;
+    }
+    if (r.unlockFxStyle) {
+      const key = `fx:${r.unlockFxStyle}`;
+      if (!this.unlockedCosmetics.includes(key)) {
+        this.unlockedCosmetics.push(key);
+      }
+      this.equippedFxStyle = r.unlockFxStyle;
+    }
+
+    const receipt = createPlayStoreSandboxReceipt(product);
+    this.purchaseHistory.push(receipt);
+    soundEngine.playVictory();
+    this.persistProgress();
+    return {
+      ok: true,
+      receipt,
+      message: `${product.title} ativado com sucesso!`,
+    };
+  }
+
+  public openRelicChest(count: 1 | 5): {
+    ok: boolean;
+    pulls: ChestPullResult[];
+    message: string;
+  } {
+    if (count === 1) {
+      if (this.chestKeys >= 1) {
+        this.chestKeys -= 1;
+      } else if (this.gems >= RELIC_CHEST_SINGLE_COST) {
+        this.gems -= RELIC_CHEST_SINGLE_COST;
+      } else {
+        return { ok: false, pulls: [], message: 'Gemas ou Chaves insuficientes.' };
+      }
+    } else {
+      if (this.gems < RELIC_CHEST_FIVE_COST) {
+        return { ok: false, pulls: [], message: 'Gemas insuficientes para o pacote 5x.' };
+      }
+      this.gems -= RELIC_CHEST_FIVE_COST;
+    }
+
+    const pulls: ChestPullResult[] = [];
+    for (let i = 0; i < count; i++) {
+      const guaranteedEpicPlus = count === 5 && i === count - 1;
+      const relicId = rollRelicFromChest(guaranteedEpicPlus);
+      const prevLevel = this.ownedRelics[relicId] ?? 0;
+      const spec = RELIC_SPECS[relicId];
+      if (prevLevel >= spec.maxLevel) {
+        this.gems += 40;
+        pulls.push({ relicId, isNew: false, newLevel: spec.maxLevel, bonusGems: 40 });
+      } else {
+        const nextLevel = prevLevel + 1;
+        this.ownedRelics[relicId] = nextLevel;
+        if (
+          prevLevel === 0 &&
+          this.equippedRelics.length < MAX_EQUIPPED_RELICS &&
+          !this.equippedRelics.includes(relicId)
+        ) {
+          this.equippedRelics.push(relicId);
+        }
+        pulls.push({ relicId, isNew: prevLevel === 0, newLevel: nextLevel, bonusGems: 0 });
+      }
+    }
+
+    this.recomputeAllCombatantStats();
+    soundEngine.playLevelUp(true);
+    this.persistProgress();
+    return {
+      ok: true,
+      pulls,
+      message: count === 5 ? '5 Baús de Relíquias abertos!' : 'Baú de Relíquia aberto!',
+    };
+  }
+
+  public toggleEquipRelic(relicId: RelicId): boolean {
+    if (!RELIC_ORDER.includes(relicId)) return false;
+    if ((this.ownedRelics[relicId] ?? 0) <= 0) return false;
+    const idx = this.equippedRelics.indexOf(relicId);
+    if (idx >= 0) {
+      this.equippedRelics.splice(idx, 1);
+    } else {
+      if (this.equippedRelics.length >= MAX_EQUIPPED_RELICS) return false;
+      this.equippedRelics.push(relicId);
+    }
+    this.recomputeAllCombatantStats();
+    soundEngine.playClick();
+    this.persistProgress();
+    return true;
+  }
+
+  public buyConsumableWithGems(id: ConsumableId): boolean {
+    const spec = CONSUMABLE_SPECS[id];
+    if (!spec || this.gems < spec.gemCost) return false;
+    this.gems -= spec.gemCost;
+    this.consumables[id] = (this.consumables[id] ?? 0) + 1;
+    soundEngine.playMerge();
+    this.persistProgress();
+    return true;
+  }
+
+  public buySoulsBundleWithGems(): boolean {
+    if (this.gems < SOULS_BUNDLE_GEM_COST) return false;
+    this.gems -= SOULS_BUNDLE_GEM_COST;
+    this.emberSouls += SOULS_BUNDLE_AMOUNT;
+    soundEngine.playMerge();
+    this.persistProgress();
+    return true;
+  }
+
+  public claimDailyStoreReward(): { ok: boolean; gems: number; souls: number } {
+    const today = getTodayDateKey();
+    if (this.dailyRewardLastClaimDate === today) {
+      return { ok: false, gems: 0, souls: 0 };
+    }
+    const gems = this.vipNoAds ? 50 : 25;
+    const souls = this.vipNoAds ? 30 : 15;
+    this.gems += gems;
+    this.emberSouls += souls;
+    this.dailyRewardLastClaimDate = today;
+    soundEngine.playVictory();
+    this.persistProgress();
+    return { ok: true, gems, souls };
+  }
+
+  public claimSeasonPassReward(tier: number, track: 'free' | 'premium'): boolean {
+    const spec = SEASON_PASS_TIERS.find((t) => t.tier === tier);
+    if (!spec) return false;
+    if (getSeasonPassTierFromXp(this.seasonPassXp) < tier) return false;
+    if (track === 'premium') {
+      if (!this.seasonPassPremium) return false;
+      if (this.claimedPremiumPassTiers.includes(tier)) return false;
+      this.claimedPremiumPassTiers.push(tier);
+    } else {
+      if (this.claimedFreePassTiers.includes(tier)) return false;
+      this.claimedFreePassTiers.push(tier);
+    }
+
+    const reward = track === 'premium' ? spec.premium : spec.free;
+    if (reward.gems) this.gems += reward.gems;
+    if (reward.emberSouls) this.emberSouls += reward.emberSouls;
+    if (reward.chestKeys) this.chestKeys += reward.chestKeys;
+    if (reward.consumables) {
+      for (const [k, qty] of Object.entries(reward.consumables)) {
+        if (qty && qty > 0) {
+          this.consumables[k] = (this.consumables[k] ?? 0) + qty;
+        }
+      }
+    }
+    if (reward.guaranteedMythicRelic) {
+      const mythics: RelicId[] = ['convergence_seal', 'dragon_heart'];
+      const chosen =
+        mythics.find((m) => (this.ownedRelics[m] ?? 0) < 5) ?? 'dragon_heart';
+      const prev = this.ownedRelics[chosen] ?? 0;
+      if (prev >= 5) {
+        this.gems += 100;
+      } else {
+        this.ownedRelics[chosen] = prev + 1;
+        if (
+          prev === 0 &&
+          this.equippedRelics.length < MAX_EQUIPPED_RELICS &&
+          !this.equippedRelics.includes(chosen)
+        ) {
+          this.equippedRelics.push(chosen);
+        }
+      }
+      this.recomputeAllCombatantStats();
+    }
+
+    soundEngine.playLevelUp(true);
+    this.persistProgress();
+    return true;
+  }
+
+  public useConsumable(id: ConsumableId): boolean {
+    if (this.phase !== 'playing') return false;
+    const count = this.consumables[id] ?? 0;
+    if (count <= 0) return false;
+
+    if (id === 'castle_potion') {
+      if (this.baseHp >= this.baseMaxHp) return false;
+      this.consumables[id] = count - 1;
+      const heal = Math.max(12, Math.round(this.baseMaxHp * 0.35));
+      this.baseHp = Math.min(this.baseMaxHp, this.baseHp + heal);
+      this.spawnTypedParticles(this.arena.castleX, this.arena.castleY, 26, 'spark', '#22C55E', 180, 0.65);
+      this.spawnTypedParticles(this.arena.castleX, this.arena.castleY, 16, 'spark', '#FACC15', 150, 0.55);
+      this.floatingTexts.push({
+        x: this.arena.castleX,
+        y: this.arena.castleY - 56,
+        vy: -30,
+        text: `+${heal} HP CASTELO`,
+        color: '#4ADE80',
+        scale: 1.2,
+        life: 1.4,
+        maxLife: 1.4,
+      });
+      this.triggerRewardBanner('POÇÃO REAL DO CASTELO!', `+${heal} HP restaurado`, 'gold', 1.2);
+      soundEngine.playLevelUp(false);
+    } else if (id === 'meteor_scroll') {
+      this.consumables[id] = count - 1;
+      const meteorDamage = Math.round(95 + this.currentStage * 16);
+      const targets = this.enemies.filter((e) => !e.isDead);
+      for (const enemy of targets) {
+        enemy.stunTimer = Math.max(enemy.stunTimer, 1.8);
+        this.explosions.push({
+          x: enemy.x,
+          y: enemy.y,
+          radius: 48,
+          life: 0.42,
+          maxLife: 0.42,
+          color: '#F97316',
+        });
+        this.spawnTypedParticles(enemy.x, enemy.y, 12, 'spark', '#F97316', 180, 0.5);
+        this.handleEnemyDamaged(enemy, meteorDamage, 0, 0, true, false, undefined);
+      }
+      this.cameraTrauma = Math.min(1, this.cameraTrauma + 0.72);
+      this.triggerRewardBanner('CHUVA DE METEOROS!', `Impacto massivo em ${targets.length} inimigos`, 'crimson', 1.3);
+      soundEngine.playExplosion();
+    } else if (id === 'frenzy_flask') {
+      this.consumables[id] = count - 1;
+      this.frenzyTimer = 10;
+      this.spells.cooldowns.blade = 0;
+      this.spells.cooldowns.shockwave = 0;
+      this.spells.cooldowns.overcharge = 0;
+      this.recomputeAllCombatantStats();
+      this.shockwaves.push({
+        x: this.arena.centerX,
+        y: this.arena.centerY,
+        currentRadius: 30,
+        maxRadius: 280,
+        life: 0.55,
+        maxLife: 0.55,
+        color: '#00D4FF',
+      });
+      this.triggerRewardBanner('FRENESI ARCANO!', '+50% Velocidade · +30% Dano · Magias Zeradas', 'electric', 1.4);
+      soundEngine.playSpellOvercharge();
+    } else {
+      return false;
+    }
+
+    this.persistProgress();
+    return true;
+  }
+
+  public getMaxHeroLevel(): number {
+    return Math.max(
+      1,
+      this.heroRoster.archer.level,
+      this.heroRoster.swordsman.level,
+      this.heroRoster.bomber.level,
+      ...this.heroes.map((h) => h.level)
+    );
+  }
+
+  public ensureDailyMissionsForToday(dateKey: string = getTodayDateKey()): void {
+    if (this.dailyMissionsDate === dateKey && this.dailyMissions.length === 3) {
+      return;
+    }
+    this.dailyMissionsDate = dateKey;
+    this.dailyMissions = generateDailyMissions(
+      this.getMaxHeroLevel(),
+      this.highestUnlockedStage,
+      dateKey
+    );
+    if (this.dailyAllCompleteBonusDate !== dateKey) {
+      this.dailyAllCompleteBonusDate = '';
+    }
+  }
+
+  public recordDailyMissionProgress(
+    kind: DailyMissionKind,
+    value: number,
+    mode: 'add' | 'max' = 'add'
+  ): void {
+    this.ensureDailyMissionsForToday();
+    let changed = false;
+    for (const mission of this.dailyMissions) {
+      if (mission.kind !== kind || mission.claimed) continue;
+      const prev = mission.progress;
+      const next =
+        mode === 'max'
+          ? Math.min(mission.target, Math.max(prev, value))
+          : Math.min(mission.target, prev + value);
+      if (next > prev) {
+        mission.progress = next;
+        changed = true;
+        if (prev < mission.target && next >= mission.target && this.phase === 'playing') {
+          this.triggerRewardBanner(
+            `MISSÃO DIÁRIA: ${mission.title.toUpperCase()}`,
+            `Resgate +${mission.rewardGems} Gemas na Loja`,
+            'gold',
+            1.35
+          );
+        }
+      }
+    }
+    if (changed && this.phase !== 'playing') {
+      this.persistProgress();
+    }
+  }
+
+  public claimDailyMission(missionId: string): {
+    ok: boolean;
+    gems: number;
+    souls: number;
+    passXp: number;
+    title: string;
+  } {
+    this.ensureDailyMissionsForToday();
+    const mission = this.dailyMissions.find((m) => m.id === missionId);
+    if (!mission || mission.claimed || mission.progress < mission.target) {
+      return { ok: false, gems: 0, souls: 0, passXp: 0, title: '' };
+    }
+    mission.claimed = true;
+    this.gems += mission.rewardGems;
+    this.emberSouls += mission.rewardSouls;
+    this.seasonPassXp += mission.rewardPassXp;
+    soundEngine.playLevelUp(false);
+    this.persistProgress();
+    return {
+      ok: true,
+      gems: mission.rewardGems,
+      souls: mission.rewardSouls,
+      passXp: mission.rewardPassXp,
+      title: mission.title,
+    };
+  }
+
+  public triggerSocialMission(kind: 'visit_instagram' | 'share_game'): {
+    ok: boolean;
+    gems: number;
+    souls: number;
+    message: string;
+  } {
+    const today = getTodayDateKey();
+    this.ensureDailyMissionsForToday(today);
+    const mission = this.dailyMissions.find((m) => m.kind === kind && !m.claimed);
+    if (mission) {
+      mission.progress = mission.target;
+      mission.claimed = true;
+      this.gems += mission.rewardGems;
+      this.emberSouls += mission.rewardSouls;
+      this.seasonPassXp += mission.rewardPassXp;
+      if (kind === 'visit_instagram') {
+        this.instagramBonusClaimedDate = today;
+      }
+      soundEngine.playLevelUp(false);
+      this.persistProgress();
+      return {
+        ok: true,
+        gems: mission.rewardGems,
+        souls: mission.rewardSouls,
+        message:
+          kind === 'visit_instagram'
+            ? `Instagram visitado! Missão concluída: +${mission.rewardGems} Gemas e +${mission.rewardSouls} Almas!`
+            : `Jogo compartilhado! Missão concluída: +${mission.rewardGems} Gemas e +${mission.rewardSouls} Almas!`,
+      };
+    }
+
+    if (kind === 'visit_instagram' && this.instagramBonusClaimedDate !== today) {
+      const tier = computeMissionDifficultyTier(this.getMaxHeroLevel(), this.highestUnlockedStage);
+      const bonusGems = 15 + Math.min(10, tier);
+      const bonusSouls = 5;
+      this.instagramBonusClaimedDate = today;
+      this.gems += bonusGems;
+      this.emberSouls += bonusSouls;
+      this.seasonPassXp += 20;
+      soundEngine.playLevelUp(false);
+      this.persistProgress();
+      return {
+        ok: true,
+        gems: bonusGems,
+        souls: bonusSouls,
+        message: `Instagram do Ember Ring curtido! Bônus diário: +${bonusGems} Gemas Arcanas!`,
+      };
+    }
+
+    return {
+      ok: false,
+      gems: 0,
+      souls: 0,
+      message:
+        kind === 'visit_instagram'
+          ? 'Você já resgatou as Gemas do Instagram hoje! Volte amanhã.'
+          : 'Missão de compartilhamento já concluída hoje!',
+    };
+  }
+
+  public claimDailyAllCompleteBonus(): { ok: boolean; gems: number; keys: number } {
+    const today = getTodayDateKey();
+    this.ensureDailyMissionsForToday(today);
+    if (this.dailyAllCompleteBonusDate === today) {
+      return { ok: false, gems: 0, keys: 0 };
+    }
+    const allClaimed =
+      this.dailyMissions.length === 3 && this.dailyMissions.every((m) => m.claimed);
+    if (!allClaimed) {
+      return { ok: false, gems: 0, keys: 0 };
+    }
+    this.dailyAllCompleteBonusDate = today;
+    this.gems += DAILY_ALL_COMPLETE_BONUS_GEMS;
+    this.chestKeys += DAILY_ALL_COMPLETE_BONUS_KEYS;
+    this.seasonPassXp += 50;
+    soundEngine.playVictory();
+    this.persistProgress();
+    return {
+      ok: true,
+      gems: DAILY_ALL_COMPLETE_BONUS_GEMS,
+      keys: DAILY_ALL_COMPLETE_BONUS_KEYS,
+    };
+  }
+
+  public getPlayerLevel(): number {
+    return getPlayerLevelFromXp(this.playerXp);
+  }
+
+  public getMilestoneBonuses(): MilestonePassiveBonuses {
+    return computeMilestonePassiveBonuses(this.claimedMilestoneLevels);
+  }
+
+  public awardPlayerXp(amount: number): {
+    leveledUp: boolean;
+    previousLevel: number;
+    newLevel: number;
+    unlockedMilestones: number[];
+  } {
+    const safeAmt = Math.max(0, Math.floor(amount));
+    const previousLevel = this.getPlayerLevel();
+    if (safeAmt <= 0) {
+      return { leveledUp: false, previousLevel, newLevel: previousLevel, unlockedMilestones: [] };
+    }
+    this.playerXp += safeAmt;
+    const newLevel = this.getPlayerLevel();
+    const unlockedMilestones: number[] = [];
+    if (newLevel > previousLevel) {
+      for (const m of MILESTONE_CATALOG) {
+        if (
+          m.level > previousLevel &&
+          m.level <= newLevel &&
+          !this.claimedMilestoneLevels.includes(m.level)
+        ) {
+          unlockedMilestones.push(m.level);
+        }
+      }
+      if (this.phase === 'playing') {
+        const highestNew = unlockedMilestones[unlockedMilestones.length - 1];
+        if (highestNew !== undefined) {
+          const spec = MILESTONE_CATALOG.find((m) => m.level === highestNew);
+          if (spec) {
+            this.triggerRewardBanner(
+              `MARCO NÍVEL ${spec.level} LIBERADO!`,
+              `${spec.title} pronto para resgatar`,
+              'gold',
+              1.5
+            );
+          }
+        }
+      }
+    }
+    return {
+      leveledUp: newLevel > previousLevel,
+      previousLevel,
+      newLevel,
+      unlockedMilestones,
+    };
+  }
+
+  public claimMilestoneReward(level: number): {
+    ok: boolean;
+    title: string;
+    rewardType: MilestoneRewardType;
+    gems: number;
+    souls: number;
+    unlockedSkin?: RingSkinId;
+    unlockedFx?: FxStyleId;
+  } {
+    const spec = MILESTONE_CATALOG.find((m) => m.level === level);
+    if (
+      !spec ||
+      this.getPlayerLevel() < spec.level ||
+      this.claimedMilestoneLevels.includes(spec.level)
+    ) {
+      return { ok: false, title: '', rewardType: 'passive', gems: 0, souls: 0 };
+    }
+
+    const prevCastleHpBonus = this.getMilestoneBonuses().castleMaxHpBonus;
+    this.claimedMilestoneLevels = [...this.claimedMilestoneLevels, spec.level].sort(
+      (a, b) => a - b
+    );
+
+    const bonusGems = spec.bonusGems ?? 0;
+    const bonusSouls = spec.bonusSouls ?? 0;
+    this.gems += bonusGems;
+    this.emberSouls += bonusSouls;
+
+    if (spec.unlockRingSkin) {
+      const key = `ring:${spec.unlockRingSkin}`;
+      if (!this.unlockedCosmetics.includes(key)) {
+        this.unlockedCosmetics.push(key);
+      }
+      this.equippedRingSkin = spec.unlockRingSkin;
+    }
+
+    if (spec.unlockFxStyle) {
+      const key = `fx:${spec.unlockFxStyle}`;
+      if (!this.unlockedCosmetics.includes(key)) {
+        this.unlockedCosmetics.push(key);
+      }
+      this.equippedFxStyle = spec.unlockFxStyle;
+    }
+
+    const nextCastleHpBonus = this.getMilestoneBonuses().castleMaxHpBonus;
+    const hpDelta = nextCastleHpBonus - prevCastleHpBonus;
+    if (hpDelta > 0) {
+      this.baseMaxHp += hpDelta;
+      this.baseHp = Math.min(this.baseMaxHp, this.baseHp + hpDelta);
+    }
+
+    this.recomputeAllCombatantStats();
+    soundEngine.playVictory();
+    this.persistProgress();
+
+    return {
+      ok: true,
+      title: spec.title,
+      rewardType: spec.rewardType,
+      gems: bonusGems,
+      souls: bonusSouls,
+      unlockedSkin: spec.unlockRingSkin,
+      unlockedFx: spec.unlockFxStyle,
+    };
   }
 
   public upgradeTalent(talentId: string): boolean {
@@ -512,7 +1216,9 @@ export class GameSimulation {
     const talentMult = Math.max(0.6, 1 - manaLvl * 0.07);
     const voidMult = this.activePacts.includes('void') ? 0.6 : 1;
     const petCdMult = 1 - PET_SPECS[this.selectedPet].spellCooldownReductionPct;
-    return talentMult * voidMult * petCdMult;
+    const relicCdMult = Math.max(0.55, 1 - this.getRelicBonuses().spellCooldownReductionPct);
+    const milestoneCdMult = Math.max(0.65, 1 - this.getMilestoneBonuses().spellCooldownReductionPct);
+    return talentMult * voidMult * petCdMult * relicCdMult * milestoneCdMult;
   }
 
   private recomputeUnitStats(unit: UnitEntity) {
@@ -533,21 +1239,48 @@ export class GameSimulation {
     const petSpec = PET_SPECS[this.selectedPet];
     const petDmgMult = 1 + petSpec.damageBonusPct;
     const petCdMult = 1 / (1 + petSpec.attackSpeedBonusPct);
+    const relics = this.getRelicBonuses();
+    const milestones = this.getMilestoneBonuses();
+    const relicDmgMult = 1 + relics.globalDamageBonusPct;
+    const milestoneDmgMult = 1 + milestones.globalDamageBonusPct;
+    const milestoneCdMult = 1 / (1 + milestones.attackSpeedBonusPct);
+    const relicRangeMult = 1 + relics.allyRangeBonusPct;
+    const frenzyDmgMult = this.frenzyTimer > 0 ? 1.3 : 1;
+    const frenzyCdMult = this.frenzyTimer > 0 ? 1 / 1.5 : 1;
 
     const prevMaxHp = unit.maxHp || baseMaxHp;
     unit.maxHp = Math.round(baseMaxHp);
     unit.hp = Math.min(unit.maxHp, Math.max(1, Math.round((unit.hp / prevMaxHp) * unit.maxHp)));
-    unit.damage = Math.max(1, Math.round(baseDmg * this.unitUpgradeDamageMult * bloodMult * voidMult * petDmgMult));
-    unit.cooldown = Math.max(0.16, Number((baseCd * windCdMult * petCdMult).toFixed(3)));
-    unit.range = Math.round(baseRange * reachBonus * windRangeMult);
-    unit.critChance = Math.min(0.8, baseCrit + critBonus);
+    unit.damage = Math.max(
+      1,
+      Math.round(
+        baseDmg *
+          this.unitUpgradeDamageMult *
+          bloodMult *
+          voidMult *
+          petDmgMult *
+          relicDmgMult *
+          milestoneDmgMult *
+          frenzyDmgMult
+      )
+    );
+    unit.cooldown = Math.max(
+      0.14,
+      Number((baseCd * windCdMult * petCdMult * milestoneCdMult * frenzyCdMult).toFixed(3))
+    );
+    unit.range = Math.round(baseRange * reachBonus * windRangeMult * relicRangeMult);
+    unit.critChance = Math.min(
+      0.85,
+      baseCrit + critBonus + relics.critChanceBonus + milestones.critChanceBonus
+    );
   }
 
   public rotateRing(delta: number) {
     if (this.phase !== 'playing') return;
     if (this.ringHeat >= 0.95) return;
+    const relics = this.getRelicBonuses();
     this.ringRotation += delta;
-    this.ringHeat = Math.min(1, this.ringHeat + 0.15);
+    this.ringHeat = Math.min(1, this.ringHeat + 0.15 * Math.max(0.4, 1 - relics.ringHeatReductionPct));
 
     const cx = this.arena.centerX;
     const cy = this.arena.centerY;
@@ -577,6 +1310,7 @@ export class GameSimulation {
     }
 
     soundEngine.playShieldBash();
+    const ringDamage = Math.round(24 * (1 + relics.ringDamageBonusPct));
     for (const enemy of this.enemies) {
       if (enemy.isDead) continue;
       const dist = distanceBetween(cx, cy, enemy.x, enemy.y);
@@ -584,9 +1318,10 @@ export class GameSimulation {
         const branch = this.arena.routes[enemy.routeIndex] ?? this.arena.routes[0];
         const totalLen = this.routeTotalLengths[enemy.routeIndex] ?? this.routeTotalLength;
         pushEnemyBackAlongRoute(enemy, branch.waypoints, 65, totalLen);
-        this.handleEnemyDamaged(enemy, 24, 0, 0, true, false, undefined);
+        this.handleEnemyDamaged(enemy, ringDamage, 0, 0, true, false, undefined);
       }
     }
+    this.recordDailyMissionProgress('rotate_ring', 1);
   }
 
   private createHeroFromRoster(
@@ -643,15 +1378,31 @@ export class GameSimulation {
     }
 
     const petSpec = PET_SPECS[this.selectedPet];
-    const dmgMult = (1 + dmgBonus) * (1 + petSpec.damageBonusPct);
-    const cdMult = (1 / (1 + hasteBonus)) * (1 / (1 + petSpec.attackSpeedBonusPct));
+    const relics = this.getRelicBonuses();
+    const milestones = this.getMilestoneBonuses();
+    const frenzyDmgMult = this.frenzyTimer > 0 ? 1.3 : 1;
+    const frenzyCdMult = this.frenzyTimer > 0 ? 1 / 1.5 : 1;
+    const dmgMult =
+      (1 + dmgBonus) *
+      (1 + petSpec.damageBonusPct) *
+      (1 + relics.globalDamageBonusPct) *
+      (1 + milestones.globalDamageBonusPct) *
+      frenzyDmgMult;
+    const cdMult =
+      (1 / (1 + hasteBonus)) *
+      (1 / (1 + petSpec.attackSpeedBonusPct)) *
+      (1 / (1 + milestones.attackSpeedBonusPct)) *
+      frenzyCdMult;
     const rangeMult = 1 + rangeBonus;
     const blastMult = 1 + blastBonus;
 
     hero.damage = Math.max(1, Math.round(base.damage * dmgMult));
-    hero.cooldown = Math.max(0.18, Number((base.cooldown * cdMult).toFixed(3)));
+    hero.cooldown = Math.max(0.15, Number((base.cooldown * cdMult).toFixed(3)));
     hero.range = Math.round(base.range * rangeMult);
-    hero.critChance = Math.min(0.6, base.critChance + critBonus);
+    hero.critChance = Math.min(
+      0.75,
+      base.critChance + critBonus + relics.critChanceBonus + milestones.critChanceBonus
+    );
     hero.blastRadius = base.blastRadius > 0 ? Math.round(base.blastRadius * blastMult) : 0;
   }
 
@@ -857,11 +1608,18 @@ export class GameSimulation {
     this.activeBanner = null;
     for (const p of this.particles) p.active = false;
 
-    this.baseHp = this.isConvergenceStage ? 120 : 100;
+    const relicStartBonuses = this.getRelicBonuses();
+    const milestoneStartBonuses = this.getMilestoneBonuses();
+    this.baseHp = (this.isConvergenceStage ? 120 : 100) + milestoneStartBonuses.castleMaxHpBonus;
     this.baseMaxHp = this.baseHp;
     this.baseLevel = 1;
-    this.essence = this.isConvergenceStage ? 95 : 70;
+    this.essence =
+      (this.isConvergenceStage ? 95 : 70) +
+      relicStartBonuses.startingEssenceBonus +
+      milestoneStartBonuses.startingEssenceBonus;
     this.essenceCollected = 0;
+    this.frenzyTimer = 0;
+    this.phoenixShieldUsed = false;
     this.lastEarnedEvolutionPoints = 0;
     this.score = 0;
     this.wave = 1;
@@ -910,9 +1668,13 @@ export class GameSimulation {
       overchargeTimer: 0,
     };
 
-    // Randomize Passive Guardian Pet on every match start unless explicitly chosen via simulated ad
+    // Randomize Passive Guardian Pet on every match start unless VIP No-Ads or unlocked via simulated ad
     if (targetPhase === 'playing') {
-      if (this.petLockedInForNextMatch || this.petChoiceUnlocked) {
+      if (this.vipNoAds) {
+        this.petWasRandom = false;
+        this.petChoiceUnlocked = true;
+        this.petLockedInForNextMatch = false;
+      } else if (this.petLockedInForNextMatch || this.petChoiceUnlocked) {
         this.petWasRandom = false;
         this.petLockedInForNextMatch = false;
         this.petChoiceUnlocked = false;
@@ -921,6 +1683,9 @@ export class GameSimulation {
         this.petWasRandom = true;
         this.petChoiceUnlocked = false;
       }
+    } else if (this.vipNoAds) {
+      this.petChoiceUnlocked = true;
+      this.petWasRandom = false;
     }
 
     // Deploy persistent hero(es): ALL 3 on Convergence stages, or the chosen Main Hero on regular stages!
@@ -1223,6 +1988,7 @@ export class GameSimulation {
     this.cameraTrauma = Math.min(1, this.cameraTrauma + 0.42);
     this.hitstopTimer = 0.04;
     soundEngine.playSpellBlade();
+    this.recordDailyMissionProgress('cast_spells', 1);
     this.spawnTypedParticles(x, y, 16, 'spark', '#00D4FF', 195, 0.48);
     this.spawnTypedParticles(x, y, 14, 'spark', '#FACC15', 220, 0.42);
     this.floatingTexts.push({
@@ -1264,6 +2030,7 @@ export class GameSimulation {
     this.cameraTrauma = Math.min(1, this.cameraTrauma + 0.62);
     this.hitstopTimer = 0.05;
     soundEngine.playSpellShockwave();
+    this.recordDailyMissionProgress('cast_spells', 1);
     this.spawnTypedParticles(this.arena.castleX, this.arena.castleY, 24, 'spark', '#00D4FF', 250, 0.52);
     this.spawnTypedParticles(this.arena.castleX, this.arena.castleY, 16, 'smoke', '#E2E8F0', 140, 0.6);
     this.triggerRewardBanner('ONDA DE CHOQUE!', 'Horda empurrada para trás', 'electric', 1.3);
@@ -1277,6 +2044,7 @@ export class GameSimulation {
 
     this.cameraTrauma = Math.min(1, this.cameraTrauma + 0.28);
     soundEngine.playSpellOvercharge();
+    this.recordDailyMissionProgress('cast_spells', 1);
     for (const h of this.heroes) {
       this.spawnTypedParticles(h.x, h.y, 14, 'spark', '#FACC15', 180, 0.55);
     }
@@ -1706,6 +2474,9 @@ export class GameSimulation {
 
       this.mergesPerformed += 1;
       this.maxUnitLevelReached = Math.max(this.maxUnitLevelReached, targetUnit.level);
+      this.recordDailyMissionProgress('perform_merges', 1);
+      this.recordDailyMissionProgress('level_up_ally', 1);
+      this.awardPlayerXp(8);
       this.score += 35 * targetUnit.level;
       this.bestScore = Math.max(this.bestScore, this.score);
       this.hitstopTimer = 0.045;
@@ -2060,10 +2831,21 @@ export class GameSimulation {
     this.survivalSeconds += dt;
     this.ringHeat = Math.max(0, this.ringHeat - dt * 0.12);
 
-    // Passive Pet Guardian Castle Regeneration (e.g., Tartaruga +2 HP/s)
+    if (this.frenzyTimer > 0) {
+      this.frenzyTimer = Math.max(0, this.frenzyTimer - dt);
+      if (this.frenzyTimer === 0) {
+        this.recomputeAllCombatantStats();
+      }
+    }
+
+    // Passive Pet Guardian + Royal Chalice Relic + Milestone Castle Regeneration
     const activePetSpec = PET_SPECS[this.selectedPet];
-    if (activePetSpec.castleRegenPerSec > 0 && this.baseHp > 0 && this.baseHp < this.baseMaxHp) {
-      this.petRegenAccum += dt * activePetSpec.castleRegenPerSec;
+    const totalCastleRegen =
+      activePetSpec.castleRegenPerSec +
+      this.getRelicBonuses().castleRegenPerSec +
+      this.getMilestoneBonuses().castleRegenPerSec;
+    if (totalCastleRegen > 0 && this.baseHp > 0 && this.baseHp < this.baseMaxHp) {
+      this.petRegenAccum += dt * totalCastleRegen;
       if (this.petRegenAccum + 1e-9 >= 1) {
         const healAmt = Math.floor(this.petRegenAccum + 1e-9);
         this.petRegenAccum = Math.max(0, this.petRegenAccum - healAmt);
@@ -2272,9 +3054,28 @@ export class GameSimulation {
     } else if (this.enemies.length === 0 && this.hordeWarnings.length === 0) {
       if (this.wave >= this.totalWavesInStage) {
         this.phase = 'victory';
-        this.emberSouls += 3 + Math.floor(this.currentStage / 5);
+        const baseSouls = 3 + Math.floor(this.currentStage / 5);
+        this.emberSouls += this.vipNoAds ? Math.ceil(baseSouls * 1.2) : baseSouls;
+        this.gems += this.currentStage % 5 === 0 ? 25 : 10;
+        if (this.currentStage % 5 === 0) {
+          this.chestKeys += 1;
+        }
+        this.seasonPassXp += 40;
         this.highestUnlockedStage = unlockNextStage(this.currentStage, this.highestUnlockedStage);
         this.bestScore = Math.max(this.bestScore, this.score);
+        this.recordDailyMissionProgress('defend_waves', 1);
+        this.recordDailyMissionProgress('survive_victory', 1);
+        this.awardPlayerXp(65 + this.currentStage * 4);
+        for (const m of this.dailyMissions) {
+          if (
+            m.kind === 'speedrun_stage' &&
+            !m.claimed &&
+            m.targetStage === this.currentStage &&
+            this.survivalSeconds <= (m.maxSeconds ?? 999)
+          ) {
+            this.recordDailyMissionProgress('speedrun_stage', 1);
+          }
+        }
         this.persistProgress();
         soundEngine.stopMusic();
         soundEngine.playVictory();
@@ -2282,6 +3083,8 @@ export class GameSimulation {
       }
       this.waveBreakTimer += dt;
       if (this.waveBreakTimer >= 1.25) {
+        this.recordDailyMissionProgress('defend_waves', 1);
+        this.awardPlayerXp(18);
         if (this.wave % 5 === 0 && !this.pendingPactChoices) {
           const available = PACT_POOL.filter((p) => !this.activePacts.includes(p.id));
           if (available.length > 0) {
@@ -2513,6 +3316,32 @@ export class GameSimulation {
         this.enemies.splice(i, 1);
 
         if (result.isGameOver) {
+          const phoenixPct = this.getRelicBonuses().phoenixReviveHpPct;
+          if (!this.phoenixShieldUsed && phoenixPct > 0) {
+            this.phoenixShieldUsed = true;
+            this.baseHp = Math.max(1, Math.round(this.baseMaxHp * phoenixPct));
+            this.shockwaves.push({
+              x: this.arena.castleX,
+              y: this.arena.castleY,
+              currentRadius: 30,
+              maxRadius: 320,
+              life: 0.65,
+              maxLife: 0.65,
+              color: '#FACC15',
+            });
+            this.spawnTypedParticles(this.arena.castleX, this.arena.castleY, 32, 'spark', '#FACC15', 220, 0.7);
+            for (const other of this.enemies) {
+              if (!other.isDead) {
+                const branchOther = this.arena.routes[other.routeIndex] ?? this.arena.routes[0];
+                const lenOther = this.routeTotalLengths[other.routeIndex] ?? this.routeTotalLength;
+                pushEnemyBackAlongRoute(other, branchOther.waypoints, 130, lenOther);
+                this.handleEnemyDamaged(other, 65 + this.currentStage * 8, 0, 0, true, false, undefined);
+              }
+            }
+            this.triggerRewardBanner('ESCUDO DA FÊNIX ATIVADO!', 'Castelo ressuscitado das cinzas!', 'gold', 1.7);
+            soundEngine.playLevelUp(true);
+            continue;
+          }
           this.phase = 'gameover';
           this.bestScore = Math.max(this.bestScore, this.score);
           this.persistProgress();
@@ -3063,8 +3892,13 @@ export class GameSimulation {
         this.currentStage,
         this.spells.overchargeTimer > 0
       );
-      this.essence += gainedEssence;
-      this.essenceCollected += gainedEssence;
+      const killRelics = this.getRelicBonuses();
+      const boostedEssence = Math.max(
+        gainedEssence,
+        Math.round(gainedEssence * (1 + killRelics.essenceKillBonusPct))
+      );
+      this.essence += boostedEssence;
+      this.essenceCollected += boostedEssence;
 
       this.comboCount += 1;
       this.comboTimer = 1.85;
@@ -3075,9 +3909,25 @@ export class GameSimulation {
       const isElite = isEliteEnemy(enemy);
       const isBoss = enemy.kind === 'boss' || Boolean(enemy.isBoss);
       if (isBoss) {
-        this.emberSouls += 5;
+        this.emberSouls += this.vipNoAds ? 6 : 5;
+        this.gems += 5;
+        this.seasonPassXp += 25;
       } else if (isElite) {
-        this.emberSouls += 1;
+        this.emberSouls += this.vipNoAds ? 2 : 1;
+        this.seasonPassXp += 8;
+      } else {
+        this.seasonPassXp += 2;
+      }
+
+      this.recordDailyMissionProgress('defeat_enemies', 1);
+      this.recordDailyMissionProgress('reach_combo', this.comboCount, 'max');
+      if (isBoss || isElite) {
+        this.recordDailyMissionProgress('defeat_elites', 1);
+      }
+      this.awardPlayerXp(isBoss ? 35 : isElite ? 10 : 3);
+
+      if ((isBoss || isElite) && killRelics.castleHealOnEliteKill > 0 && this.baseHp > 0 && this.baseHp < this.baseMaxHp) {
+        this.baseHp = Math.min(this.baseMaxHp, this.baseHp + killRelics.castleHealOnEliteKill);
       }
 
       this.hitstopTimer = Math.max(
@@ -3150,11 +4000,19 @@ export class GameSimulation {
         const killerUnit = this.units.find((u) => u.id === attackerUnitId);
         if (killerUnit) {
           killerUnit.kills = (killerUnit.kills ?? 0) + 1;
-          const gainedUnitXp = Math.max(4, Math.round(enemy.xpReward * overchargeMult));
+          const gainedUnitXp = Math.max(
+            4,
+            Math.round(
+              enemy.xpReward *
+                overchargeMult *
+                (1 + killRelics.allyXpBonusPct + this.getMilestoneBonuses().allyXpBonusPct)
+            )
+          );
           const unitLvlRes = applyUnitXpGain(killerUnit, gainedUnitXp);
           if (unitLvlRes.leveledUp) {
             this.recomputeUnitStats(killerUnit);
             this.maxUnitLevelReached = Math.max(this.maxUnitLevelReached, killerUnit.level);
+            this.recordDailyMissionProgress('level_up_ally', 1);
             soundEngine.playMerge();
             this.spawnTypedParticles(killerUnit.x, killerUnit.y, 14, 'spark', '#FACC15', 145, 0.45);
             this.spawnTypedParticles(killerUnit.x, killerUnit.y, 8, 'spark', '#00D4FF', 110, 0.4);
@@ -3372,8 +4230,40 @@ export class GameSimulation {
       ringHeat: this.ringHeat,
       selectedPet: this.selectedPet,
       petDropLuckBonus: this.getItemDropLuckBonus(),
-      petChoiceUnlocked: this.petChoiceUnlocked,
+      petChoiceUnlocked: this.petChoiceUnlocked || this.vipNoAds,
       petWasRandom: this.petWasRandom,
+      gems: this.gems,
+      chestKeys: this.chestKeys,
+      vipNoAds: this.vipNoAds,
+      starterPackClaimed: this.starterPackClaimed,
+      seasonPassPremium: this.seasonPassPremium,
+      seasonPassXp: this.seasonPassXp,
+      claimedFreePassTiers: [...this.claimedFreePassTiers],
+      claimedPremiumPassTiers: [...this.claimedPremiumPassTiers],
+      ownedRelics: { ...this.ownedRelics },
+      equippedRelics: [...this.equippedRelics],
+      consumables: { ...this.consumables },
+      frenzyTimer: this.frenzyTimer,
+      phoenixShieldReady: !this.phoenixShieldUsed && this.getRelicBonuses().phoenixReviveHpPct > 0,
+      dailyRewardClaimedToday: this.dailyRewardLastClaimDate === getTodayDateKey(),
+      purchaseHistoryCount: this.purchaseHistory.length,
+      dailyMissions: this.dailyMissions.map((m) => ({ ...m })),
+      dailyMissionsDate: this.dailyMissionsDate,
+      dailyMissionTier: computeMissionDifficultyTier(
+        this.getMaxHeroLevel(),
+        this.highestUnlockedStage
+      ),
+      dailyAllCompleteBonusClaimed: this.dailyAllCompleteBonusDate === getTodayDateKey(),
+      instagramBonusClaimedToday: this.instagramBonusClaimedDate === getTodayDateKey(),
+      playerXp: this.playerXp,
+      playerLevel: this.getPlayerLevel(),
+      playerCurrentLevelXp: getPlayerXpBounds(this.getPlayerLevel()).currentFloor,
+      playerNextLevelXp: getPlayerXpBounds(this.getPlayerLevel()).nextThreshold,
+      claimedMilestoneLevels: [...this.claimedMilestoneLevels],
+      readyMilestonesCount: getUnclaimedReadyMilestonesCount(
+        this.getPlayerLevel(),
+        this.claimedMilestoneLevels
+      ),
       enemyKillsByCatalogId: { ...this.enemyKillsByCatalogId },
       discoveredEnemyIds: [...this.discoveredEnemyIds],
       unlockedAchievements: [...this.unlockedAchievements],

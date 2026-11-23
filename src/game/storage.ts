@@ -13,6 +13,14 @@ import {
   TOTAL_STAGES,
 } from './types';
 
+import {
+  CONSUMABLE_ORDER,
+  MAX_EQUIPPED_RELICS,
+  PurchaseReceipt,
+  RELIC_ORDER,
+} from './storeCatalog';
+import { DailyMissionState } from './dailyMissions';
+
 const STORAGE_KEY = 'ember_ring_defense_progress_v3';
 const LEGACY_STORAGE_KEY = 'ember_ring_defense_progress_v2';
 
@@ -34,6 +42,25 @@ export interface SavedProgress {
   equippedFxStyle: FxStyleId;
   totalLifetimeKills: number;
   selectedPet: PetKind;
+  gems: number;
+  chestKeys: number;
+  vipNoAds: boolean;
+  starterPackClaimed: boolean;
+  seasonPassPremium: boolean;
+  seasonPassXp: number;
+  claimedFreePassTiers: number[];
+  claimedPremiumPassTiers: number[];
+  ownedRelics: Record<string, number>;
+  equippedRelics: string[];
+  consumables: Record<string, number>;
+  dailyRewardLastClaimDate: string;
+  purchaseHistory: PurchaseReceipt[];
+  dailyMissionsDate: string;
+  dailyMissions: DailyMissionState[];
+  dailyAllCompleteBonusDate: string;
+  instagramBonusClaimedDate: string;
+  playerXp: number;
+  claimedMilestoneLevels: number[];
 }
 
 const VALID_HEROES: HeroClass[] = ['archer', 'swordsman', 'bomber'];
@@ -168,6 +195,29 @@ export function createDefaultProgress(seed?: number): SavedProgress {
     equippedFxStyle: 'standard',
     totalLifetimeKills: 0,
     selectedPet: 'turtle',
+    gems: 60,
+    chestKeys: 1,
+    vipNoAds: false,
+    starterPackClaimed: false,
+    seasonPassPremium: false,
+    seasonPassXp: 0,
+    claimedFreePassTiers: [],
+    claimedPremiumPassTiers: [],
+    ownedRelics: {},
+    equippedRelics: [],
+    consumables: {
+      castle_potion: 1,
+      meteor_scroll: 1,
+      frenzy_flask: 1,
+    },
+    dailyRewardLastClaimDate: '',
+    purchaseHistory: [],
+    dailyMissionsDate: '',
+    dailyMissions: [],
+    dailyAllCompleteBonusDate: '',
+    instagramBonusClaimedDate: '',
+    playerXp: 0,
+    claimedMilestoneLevels: [],
   };
 }
 
@@ -257,6 +307,96 @@ export function loadProgress(): SavedProgress {
     const selectedPet: PetKind = VALID_PETS.includes(parsed.selectedPet as PetKind)
       ? (parsed.selectedPet as PetKind)
       : 'turtle';
+    const gems =
+      parsed.gems === undefined ? 60 : Math.max(0, Math.floor(Number(parsed.gems) || 0));
+    const chestKeys =
+      parsed.chestKeys === undefined ? 1 : Math.max(0, Math.floor(Number(parsed.chestKeys) || 0));
+    const vipNoAds = Boolean(parsed.vipNoAds);
+    const starterPackClaimed = Boolean(parsed.starterPackClaimed);
+    const seasonPassPremium = Boolean(parsed.seasonPassPremium);
+    const seasonPassXp = Math.max(0, Math.floor(Number(parsed.seasonPassXp) || 0));
+    const claimedFreePassTiers = Array.isArray(parsed.claimedFreePassTiers)
+      ? Array.from(
+          new Set(
+            parsed.claimedFreePassTiers
+              .map((n) => Math.floor(Number(n)))
+              .filter((n) => Number.isFinite(n) && n >= 1 && n <= 10)
+          )
+        )
+      : [];
+    const claimedPremiumPassTiers = Array.isArray(parsed.claimedPremiumPassTiers)
+      ? Array.from(
+          new Set(
+            parsed.claimedPremiumPassTiers
+              .map((n) => Math.floor(Number(n)))
+              .filter((n) => Number.isFinite(n) && n >= 1 && n <= 10)
+          )
+        )
+      : [];
+    const rawRelics = sanitizeStringNumberRecord(parsed.ownedRelics);
+    const ownedRelics: Record<string, number> = {};
+    for (const rId of RELIC_ORDER) {
+      if (rawRelics[rId] && rawRelics[rId] > 0) {
+        ownedRelics[rId] = Math.min(5, rawRelics[rId]);
+      }
+    }
+    const equippedRelics = Array.isArray(parsed.equippedRelics)
+      ? Array.from(
+          new Set(
+            parsed.equippedRelics.filter(
+              (id): id is string => typeof id === 'string' && (ownedRelics[id] ?? 0) > 0
+            )
+          )
+        ).slice(0, MAX_EQUIPPED_RELICS)
+      : [];
+    const rawConsumables = parsed.consumables
+      ? sanitizeStringNumberRecord(parsed.consumables)
+      : { castle_potion: 1, meteor_scroll: 1, frenzy_flask: 1 };
+    const consumables: Record<string, number> = {};
+    for (const cId of CONSUMABLE_ORDER) {
+      consumables[cId] = Math.max(0, Math.floor(rawConsumables[cId] ?? 0));
+    }
+    const dailyRewardLastClaimDate =
+      typeof parsed.dailyRewardLastClaimDate === 'string' ? parsed.dailyRewardLastClaimDate : '';
+    const purchaseHistory: PurchaseReceipt[] = Array.isArray(parsed.purchaseHistory)
+      ? parsed.purchaseHistory
+          .filter(
+            (r): r is PurchaseReceipt =>
+              Boolean(r) && typeof r.orderId === 'string' && typeof r.sku === 'string'
+          )
+          .slice(-50)
+      : [];
+    const dailyMissionsDate =
+      typeof parsed.dailyMissionsDate === 'string' ? parsed.dailyMissionsDate : '';
+    const dailyMissions: DailyMissionState[] = Array.isArray(parsed.dailyMissions)
+      ? parsed.dailyMissions
+          .filter(
+            (m): m is DailyMissionState =>
+              Boolean(m) &&
+              typeof m.id === 'string' &&
+              typeof m.kind === 'string' &&
+              typeof m.target === 'number'
+          )
+          .slice(0, 5)
+      : [];
+    const dailyAllCompleteBonusDate =
+      typeof parsed.dailyAllCompleteBonusDate === 'string'
+        ? parsed.dailyAllCompleteBonusDate
+        : '';
+    const instagramBonusClaimedDate =
+      typeof parsed.instagramBonusClaimedDate === 'string'
+        ? parsed.instagramBonusClaimedDate
+        : '';
+    const playerXp = Math.max(0, Math.floor(Number(parsed.playerXp) || 0));
+    const claimedMilestoneLevels = Array.isArray(parsed.claimedMilestoneLevels)
+      ? Array.from(
+          new Set(
+            parsed.claimedMilestoneLevels
+              .map((n) => Math.floor(Number(n)))
+              .filter((n) => Number.isFinite(n) && n >= 1 && n <= 50)
+          )
+        ).sort((a, b) => a - b)
+      : [];
 
     return {
       highestUnlockedStage: stage,
@@ -276,6 +416,25 @@ export function loadProgress(): SavedProgress {
       equippedFxStyle,
       totalLifetimeKills,
       selectedPet,
+      gems,
+      chestKeys,
+      vipNoAds,
+      starterPackClaimed,
+      seasonPassPremium,
+      seasonPassXp,
+      claimedFreePassTiers,
+      claimedPremiumPassTiers,
+      ownedRelics,
+      equippedRelics,
+      consumables,
+      dailyRewardLastClaimDate,
+      purchaseHistory,
+      dailyMissionsDate,
+      dailyMissions,
+      dailyAllCompleteBonusDate,
+      instagramBonusClaimedDate,
+      playerXp,
+      claimedMilestoneLevels,
     };
   } catch {
     return createDefaultProgress(7319);
@@ -325,6 +484,27 @@ export function saveProgress(progress: SavedProgress): void {
           : 'standard',
         totalLifetimeKills: Math.max(0, Math.floor(progress.totalLifetimeKills || 0)),
         selectedPet: VALID_PETS.includes(progress.selectedPet) ? progress.selectedPet : 'turtle',
+        gems: Math.max(0, Math.floor(progress.gems || 0)),
+        chestKeys: Math.max(0, Math.floor(progress.chestKeys || 0)),
+        vipNoAds: Boolean(progress.vipNoAds),
+        starterPackClaimed: Boolean(progress.starterPackClaimed),
+        seasonPassPremium: Boolean(progress.seasonPassPremium),
+        seasonPassXp: Math.max(0, Math.floor(progress.seasonPassXp || 0)),
+        claimedFreePassTiers: Array.from(new Set(progress.claimedFreePassTiers ?? [])),
+        claimedPremiumPassTiers: Array.from(new Set(progress.claimedPremiumPassTiers ?? [])),
+        ownedRelics: sanitizeStringNumberRecord(progress.ownedRelics),
+        equippedRelics: (progress.equippedRelics ?? []).slice(0, MAX_EQUIPPED_RELICS),
+        consumables: sanitizeStringNumberRecord(progress.consumables),
+        dailyRewardLastClaimDate: progress.dailyRewardLastClaimDate ?? '',
+        purchaseHistory: (progress.purchaseHistory ?? []).slice(-50),
+        dailyMissionsDate: progress.dailyMissionsDate ?? '',
+        dailyMissions: (progress.dailyMissions ?? []).slice(0, 5),
+        dailyAllCompleteBonusDate: progress.dailyAllCompleteBonusDate ?? '',
+        instagramBonusClaimedDate: progress.instagramBonusClaimedDate ?? '',
+        playerXp: Math.max(0, Math.floor(progress.playerXp || 0)),
+        claimedMilestoneLevels: Array.from(
+          new Set(progress.claimedMilestoneLevels ?? [])
+        ).sort((a, b) => a - b),
       })
     );
   } catch {

@@ -1,3 +1,5 @@
+import type { DailyMissionState } from './dailyMissions';
+
 export type GamePhase = 'title' | 'playing' | 'paused' | 'victory' | 'gameover';
 
 export type HeroClass = 'archer' | 'swordsman' | 'bomber';
@@ -130,8 +132,21 @@ export const PET_SPECS: Record<PetKind, PetSpec> = {
   },
 };
 
-export type RingSkinId = 'classic' | 'frost' | 'crimson' | 'eclipse';
-export type FxStyleId = 'standard' | 'arcane' | 'solar' | 'venom';
+export type RingSkinId =
+  | 'classic'
+  | 'frost'
+  | 'crimson'
+  | 'eclipse'
+  | 'celestial'
+  | 'dragonfire'
+  | 'void_sovereign';
+export type FxStyleId =
+  | 'standard'
+  | 'arcane'
+  | 'solar'
+  | 'venom'
+  | 'astral'
+  | 'starfire';
 
 export interface RingSkinSpec {
   id: RingSkinId;
@@ -142,6 +157,8 @@ export interface RingSkinSpec {
   secondaryColor: string;
   runeColor: string;
   glowColor: string;
+  /** Present when unlocked exclusively via a Player Experience Milestone */
+  milestoneLevel?: number;
 }
 
 export interface FxStyleSpec {
@@ -151,6 +168,8 @@ export interface FxStyleSpec {
   cost: number;
   projectileTint: string;
   slashTint: string;
+  /** Present when unlocked exclusively via a Player Experience Milestone */
+  milestoneLevel?: number;
 }
 
 export interface AchievementSpec {
@@ -203,6 +222,39 @@ export const RING_SKINS: Record<RingSkinId, RingSkinSpec> = {
     runeColor: '#E9D5FF',
     glowColor: 'rgba(168, 85, 247, 0.55)',
   },
+  celestial: {
+    id: 'celestial',
+    name: 'Anel Brasa Celestial',
+    description: 'Visual raro de Marco Nv.5: safira astral entrelaçada com ouro celeste.',
+    cost: 0,
+    primaryColor: '#38BDF8',
+    secondaryColor: '#FACC15',
+    runeColor: '#FEF9C3',
+    glowColor: 'rgba(56, 189, 248, 0.62)',
+    milestoneLevel: 5,
+  },
+  dragonfire: {
+    id: 'dragonfire',
+    name: 'Anel Dragão Solar',
+    description: 'Visual lendário de Marco Nv.20: chama vulcânica e runas dracônicas.',
+    cost: 0,
+    primaryColor: '#F97316',
+    secondaryColor: '#FF2E4C',
+    runeColor: '#FDE047',
+    glowColor: 'rgba(249, 115, 22, 0.66)',
+    milestoneLevel: 20,
+  },
+  void_sovereign: {
+    id: 'void_sovereign',
+    name: 'Anel Soberano do Vazio',
+    description: 'Visual mítico de Marco Nv.50: coroa carmesim-violeta de domínio absoluto.',
+    cost: 0,
+    primaryColor: '#FF2E4C',
+    secondaryColor: '#9333EA',
+    runeColor: '#FDE047',
+    glowColor: 'rgba(236, 72, 153, 0.7)',
+    milestoneLevel: 50,
+  },
 };
 
 export const FX_STYLES: Record<FxStyleId, FxStyleSpec> = {
@@ -237,6 +289,24 @@ export const FX_STYLES: Record<FxStyleId, FxStyleSpec> = {
     cost: 15,
     projectileTint: '#10B981',
     slashTint: '#A3E635',
+  },
+  astral: {
+    id: 'astral',
+    name: 'Rastro Astral',
+    description: 'Efeito épico de Marco Nv.12: rajadas safira prismáticas e cortes celestes.',
+    cost: 0,
+    projectileTint: '#818CF8',
+    slashTint: '#38BDF8',
+    milestoneLevel: 12,
+  },
+  starfire: {
+    id: 'starfire',
+    name: 'Chama Estelar',
+    description: 'Efeito lendário de Marco Nv.30: projéteis dourado-violeta incandescentes.',
+    cost: 0,
+    projectileTint: '#FDE047',
+    slashTint: '#E879F9',
+    milestoneLevel: 30,
   },
 };
 
@@ -868,6 +938,32 @@ export interface HudSnapshot {
   petDropLuckBonus: number;
   petChoiceUnlocked: boolean;
   petWasRandom: boolean;
+  gems: number;
+  chestKeys: number;
+  vipNoAds: boolean;
+  starterPackClaimed: boolean;
+  seasonPassPremium: boolean;
+  seasonPassXp: number;
+  claimedFreePassTiers: number[];
+  claimedPremiumPassTiers: number[];
+  ownedRelics: Record<string, number>;
+  equippedRelics: string[];
+  consumables: Record<string, number>;
+  frenzyTimer: number;
+  phoenixShieldReady: boolean;
+  dailyRewardClaimedToday: boolean;
+  purchaseHistoryCount: number;
+  dailyMissions: DailyMissionState[];
+  dailyMissionsDate: string;
+  dailyMissionTier: number;
+  dailyAllCompleteBonusClaimed: boolean;
+  instagramBonusClaimedToday: boolean;
+  playerXp: number;
+  playerLevel: number;
+  playerCurrentLevelXp: number;
+  playerNextLevelXp: number;
+  claimedMilestoneLevels: number[];
+  readyMilestonesCount: number;
   enemyKillsByCatalogId: Record<number, number>;
   discoveredEnemyIds: number[];
   unlockedAchievements: string[];

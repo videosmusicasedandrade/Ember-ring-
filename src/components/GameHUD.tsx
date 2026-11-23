@@ -3,6 +3,9 @@ import {
   ChevronDown,
   ChevronUp,
   Crosshair,
+  Flame,
+  FlaskConical,
+  Heart,
   Lock,
   Move,
   Music,
@@ -19,6 +22,11 @@ import {
 } from 'lucide-react';
 import { soundEngine } from '../game/audio';
 import { ALLY_ALBUM, getUnlockedAlliesForStage } from '../game/bestiaryData';
+import {
+  CONSUMABLE_ORDER,
+  CONSUMABLE_SPECS,
+  ConsumableId,
+} from '../game/storeCatalog';
 import {
   HERO_SPECS,
   HudSnapshot,
@@ -45,6 +53,7 @@ interface GameHUDProps {
   onSelectPet: (pet: PetKind) => void;
   onRequestPetAd: (targetPet?: PetKind) => void;
   onActivateSpell: (kind: SpellKind) => void;
+  onUseConsumable: (id: ConsumableId) => void;
   onTogglePause: () => void;
   onToggleMuteMusic: () => void;
   onToggleMuteSfx: () => void;
@@ -103,6 +112,7 @@ export const GameHUD: React.FC<GameHUDProps> = ({
   onSelectPet,
   onRequestPetAd,
   onActivateSpell,
+  onUseConsumable,
   onTogglePause,
   onToggleMuteMusic,
   onToggleMuteSfx,
@@ -722,6 +732,56 @@ export const GameHUD: React.FC<GameHUDProps> = ({
             ↻
           </button>
         </div>
+
+        {/* Tactical Store Consumables Quick-Bar (Live Battle Items) */}
+        <div
+          aria-label="Itens Táticos de Combate"
+          className="mt-1 flex items-center gap-1 rounded-xl border border-[#334155] bg-[#0A1124]/92 p-1 shadow-[0_4px_0_rgba(2,6,23,0.75)]"
+        >
+          {CONSUMABLE_ORDER.map((id) => {
+            const spec = CONSUMABLE_SPECS[id];
+            const qty = hud.consumables[id] ?? 0;
+            const isFrenzyRunning = id === 'frenzy_flask' && hud.frenzyTimer > 0;
+            return (
+              <button
+                key={id}
+                type="button"
+                tabIndex={-1}
+                data-testid={`hud-consumable-${id}`}
+                disabled={qty <= 0}
+                title={`${spec.name} [${spec.hotkey}] — ${spec.description}`}
+                onClick={(e) => {
+                  e.currentTarget.blur();
+                  onUseConsumable(id);
+                }}
+                className={`relative flex flex-1 flex-col items-center justify-center rounded-lg border px-1.5 py-1 text-center transition-transform active:translate-y-0.5 ${
+                  isFrenzyRunning
+                    ? 'border-[#00D4FF] bg-[#082F49] text-[#00D4FF]'
+                    : qty > 0
+                      ? 'border-[#1E293B] bg-[#0F172A] text-white hover:border-[#FACC15]'
+                      : 'cursor-not-allowed border-[#1E293B] bg-[#080D1A]/60 text-[#475569] opacity-55'
+                }`}
+              >
+                <div className="flex items-center gap-0.5">
+                  {id === 'castle_potion' && <Heart className="h-3.5 w-3.5 text-[#22C55E]" />}
+                  {id === 'meteor_scroll' && <Flame className="h-3.5 w-3.5 text-[#F97316]" />}
+                  {id === 'frenzy_flask' && <FlaskConical className="h-3.5 w-3.5 text-[#00D4FF]" />}
+                  <span className="font-mono-tabular text-[10px] font-bold">
+                    {isFrenzyRunning ? `${hud.frenzyTimer.toFixed(0)}s` : `x${qty}`}
+                  </span>
+                </div>
+                <span className="text-[9px] font-semibold text-[#94A3B8]">[{spec.hotkey}]</span>
+              </button>
+            );
+          })}
+        </div>
+
+        {hud.phoenixShieldReady && (
+          <div className="hidden items-center justify-center gap-1 rounded-lg border border-[#FACC15]/50 bg-[#422006]/85 px-2 py-1 text-[10px] font-bold text-[#FEF08A] sm:flex">
+            <Shield className="h-3 w-3 text-[#FACC15]" />
+            <span>Escudo da Fênix Pronto</span>
+          </div>
+        )}
       </div>
 
       {/* Bottom Support Troop Recruitment Dock (Dynamically unlocked Allies from ALLY_ALBUM) */}

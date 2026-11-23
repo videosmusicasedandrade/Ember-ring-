@@ -50,6 +50,20 @@ import {
   rollCriticalHit,
   unlockNextStage,
 } from './engineMath';
+import {
+  computeMissionDifficultyTier,
+  DAILY_ALL_COMPLETE_BONUS_GEMS,
+  DAILY_ALL_COMPLETE_BONUS_KEYS,
+  generateDailyMissions,
+} from './dailyMissions';
+import {
+  computeMilestonePassiveBonuses,
+  getPlayerLevelFromXp,
+  getPlayerXpBounds,
+  MAX_PLAYER_LEVEL,
+  MILESTONE_CATALOG,
+  PLAYER_LEVEL_XP_THRESHOLDS,
+} from './milestones';
 import { GameSimulation } from './simulation';
 import { generateConvergenceStages } from './storage';
 import {
@@ -973,6 +987,254 @@ test('Match start assigns a random pet by default, while watching simulated ad u
   assert.equal(sim.petWasRandom, true);
   assert.ok(PET_ORDER.includes(sim.selectedPet));
 });
+
+test('Play Store VIP No-Ads, Relic Chests, Equipable Relics, Season Pass, and Live Consumables work end-to-end', () => {
+  const sim = new GameSimulation();
+
+  // 1. Purchase VIP No-Ads Play Store SKU -> permanently unlocks free pet choice + gems + chest key
+  const gemsBefore = sim.gems;
+  const vipRes = sim.purchasePlayStoreProduct('com.emberring.vip_no_ads');
+  assert.equal(vipRes.ok, true);
+  assert.ok(vipRes.receipt?.orderId.startsWith('GPA.'));
+  assert.equal(sim.vipNoAds, true);
+  assert.equal(sim.gems, gemsBefore + 100);
+  // Buying VIP again is blocked as one-time purchase
+  assert.equal(sim.purchasePlayStoreProduct('com.emberring.vip_no_ads').ok, false);
+
+  // VIP keeps chosen pet across multiple new matches without randomizing
+  sim.setSelectedPet('tiger');
+  sim.resetWorld('playing', 1, 'archer');
+  assert.equal(sim.selectedPet, 'tiger');
+  assert.equal(sim.petWasRandom, false);
+  sim.resetWorld('playing', 2, 'archer');
+  assert.equal(sim.selectedPet, 'tiger');
+  assert.equal(sim.petWasRandom, false);
+
+  // 2. Open Relic Chest (uses free Chest Key first) and verify Relic equips and boosts combat
+  const chestRes = sim.openRelicChest(1);
+  assert.equal(chestRes.ok, true);
+  assert.equal(chestRes.pulls.length, 1);
+
+  // Equip Dragon Heart & Essence Crown and verify live starting Essence + Hero damage boost
+  sim.ownedRelics.dragon_heart = 2;
+  sim.ownedRelics.essence_crown = 1;
+  sim.equippedRelics = ['dragon_heart', 'essence_crown'];
+  sim.resetWorld('playing', 1, 'archer');
+  assert.ok(sim.essence >= 90, `Essence Crown should boost starting essence, got ${sim.essence}`);
+  const boostedHeroDmg = sim.hero.damage;
+
+  // 3. Tactical Consumables: Castle Potion heals Castle; Frenzy Flask boosts attack speed & resets spell CDs
+  sim.consumables.castle_potion = 2;
+  sim.consumables.frenzy_flask = 1;
+  sim.baseHp = Math.max(1, sim.baseMaxHp - 50);
+  const hpBeforePotion = sim.baseHp;
+  assert.equal(sim.useConsumable('castle_potion'), true);
+  assert.ok(sim.baseHp > hpBeforePotion, 'Castle Potion should heal castle HP');
+  assert.equal(sim.consumables.castle_potion, 1);
+
+  sim.spells.cooldowns.blade = 8;
+  assert.equal(sim.useConsumable('frenzy_flask'), true);
+  assert.equal(sim.spells.cooldowns.blade, 0, 'Frenzy Flask should reset spell cooldowns');
+  assert.ok(sim.hero.damage > boostedHeroDmg, 'Frenzy Flask should boost Hero damage');
+
+  // 4. Season Pass Premium purchase & tier claim
+  assert.equal(sim.purchasePlayStoreProduct('com.emberring.season_pass').ok, true);
+  sim.seasonPassXp = 200;
+  const gemsBeforePass = sim.gems;
+  assert.equal(sim.claimSeasonPassReward(1, 'premium'), true);
+  assert.equal(sim.gems, gemsBeforePass + 80);
+});
+
+test('Daily Missions generate 3 distinct missions per day, rotate across days, and scale difficulty & gems with player level', () => {
+  const lowTier = computeMissionDifficultyTier(1, 1);
+  const highTier = computeMissionDifficultyTier(15, 30);
+  assert.equal(lowTier, 1);
+  assert.ok(highTier > lowTier, 'Higher hero level and stage must raise mission difficulty tier');
+
+  const day1Low = generateDailyMissions(1, 1, '2026-11-22');
+  const day1High = generateDailyMissions(15, 30, '2026-11-22');
+  assert.equal(day1Low.length, 3);
+  assert.equal(new Set(day1Low.map((m) => m.kind)).size, 3, 'All 3 daily missions must be distinct');
+  assert.equal(day1High.length, 3);
+  assert.ok(
+    day1High[0].rewardGems > day1Low[0].rewardGems,
+    'Higher difficulty tier must reward more Gems'
+  );
+  assert.ok(
+    day1High[0].target >= day1Low[0].target,
+    'Higher difficulty tier must scale up mission target'
+  );
+
+  // Verify variety across 14 consecutive days
+  const seenKinds = new Set<string>();
+  for (let d = 1; d <= 14; d++) {
+    const key = `2026-11-${String(d).padStart(2, '0')}`;
+    const list = generateDailyMissions(6, 10, key);
+    assert.equal(list.length, 3);
+    assert.equal(new Set(list.map((m) => m.kind)).size, 3);
+    for (const m of list) seenKinds.add(m.kind);
+  }
+  assert.ok(seenKinds.size >= 8, `Expected broad mission variety across days, saw ${seenKinds.size}`);
+});
+
+test('Daily Missions track live gameplay, reward instant Instagram/Share clicks, and grant 3/3 completion bonus', () => {
+  const sim = new GameSimulation();
+  sim.resetWorld('playing', 1, 'archer');
+
+  // Inject deterministic 3-mission set covering combat, combo/speedrun, and Instagram social
+  sim.dailyMissions = [
+    {
+      id: 'test:defeat_enemies',
+      kind: 'defeat_enemies',
+      category: 'combat',
+      title: 'Abata 3 Inimigos',
+      description: 'Teste',
+      target: 3,
+      progress: 0,
+      rewardGems: 25,
+      rewardSouls: 10,
+      rewardPassXp: 30,
+      difficultyTier: 1,
+      claimed: false,
+    },
+    {
+      id: 'test:rotate_ring',
+      kind: 'rotate_ring',
+      category: 'skill',
+      title: 'Gire o Anel 2 Vezes',
+      description: 'Teste',
+      target: 2,
+      progress: 0,
+      rewardGems: 20,
+      rewardSouls: 8,
+      rewardPassXp: 25,
+      difficultyTier: 1,
+      claimed: false,
+    },
+    {
+      id: 'test:visit_instagram',
+      kind: 'visit_instagram',
+      category: 'social',
+      title: 'Curta nosso Instagram',
+      description: 'Teste',
+      target: 1,
+      progress: 0,
+      rewardGems: 22,
+      rewardSouls: 8,
+      rewardPassXp: 25,
+      difficultyTier: 1,
+      claimed: false,
+    },
+  ];
+  sim.dailyAllCompleteBonusDate = '';
+  sim.instagramBonusClaimedDate = '';
+
+  // 1. Clicking Instagram immediately awards Gems and marks the mission complete
+  const gemsStart = sim.gems;
+  const igRes = sim.triggerSocialMission('visit_instagram');
+  assert.equal(igRes.ok, true);
+  assert.equal(igRes.gems, 22);
+  assert.equal(sim.gems, gemsStart + 22);
+  assert.equal(sim.dailyMissions[2].claimed, true);
+
+  // 2. Rotating the ring live advances rotate_ring mission
+  sim.rotateRing(Math.PI / 4);
+  sim.ringHeat = 0;
+  sim.rotateRing(Math.PI / 4);
+  assert.equal(sim.dailyMissions[1].progress, 2);
+  const claimRing = sim.claimDailyMission('test:rotate_ring');
+  assert.equal(claimRing.ok, true);
+  assert.equal(claimRing.gems, 20);
+
+  // 3. Complete combat mission and verify 3/3 all-complete bonus unlocks
+  sim.recordDailyMissionProgress('defeat_enemies', 3);
+  assert.equal(sim.claimDailyMission('test:defeat_enemies').ok, true);
+
+  const gemsBeforeBonus = sim.gems;
+  const keysBeforeBonus = sim.chestKeys;
+  const bonusRes = sim.claimDailyAllCompleteBonus();
+  assert.equal(bonusRes.ok, true);
+  assert.equal(bonusRes.gems, DAILY_ALL_COMPLETE_BONUS_GEMS);
+  assert.equal(bonusRes.keys, DAILY_ALL_COMPLETE_BONUS_KEYS);
+  assert.equal(sim.gems, gemsBeforeBonus + DAILY_ALL_COMPLETE_BONUS_GEMS);
+  assert.equal(sim.chestKeys, keysBeforeBonus + DAILY_ALL_COMPLETE_BONUS_KEYS);
+
+  // Double-claim is blocked
+  assert.equal(sim.claimDailyAllCompleteBonus().ok, false);
+});
+
+test('Player Experience Milestones unlock rare exclusive aesthetics and permanent passive buffs separately from Daily Missions', () => {
+  assert.equal(MILESTONE_CATALOG.length, 10);
+  assert.equal(getPlayerLevelFromXp(0), 1);
+  assert.equal(getPlayerLevelFromXp(PLAYER_LEVEL_XP_THRESHOLDS[1]), 2);
+  assert.equal(getPlayerLevelFromXp(PLAYER_LEVEL_XP_THRESHOLDS[MAX_PLAYER_LEVEL - 1]), MAX_PLAYER_LEVEL);
+
+  const boundsLv2 = getPlayerXpBounds(2);
+  assert.equal(boundsLv2.currentFloor, PLAYER_LEVEL_XP_THRESHOLDS[1]);
+  assert.equal(boundsLv2.nextThreshold, PLAYER_LEVEL_XP_THRESHOLDS[2]);
+
+  const sim = new GameSimulation();
+  sim.resetWorld('playing', 1, 'archer');
+  const baseCastleHp = sim.baseMaxHp;
+  const baseHeroDmg = sim.hero.damage;
+
+  // Milestone-exclusive aesthetics cannot be purchased directly with Ember Souls before unlocking
+  sim.emberSouls = 999;
+  assert.equal(sim.buyOrEquipRingSkin('celestial'), false);
+  assert.equal(sim.buyOrEquipFxStyle('astral'), false);
+
+  // Claiming before reaching required player level fails
+  assert.equal(sim.claimMilestoneReward(2).ok, false);
+
+  // Reach Player Level 5 via awardPlayerXp -> unlocks Lv.2 & Lv.5 milestones
+  const xpForLv5 = PLAYER_LEVEL_XP_THRESHOLDS[4];
+  const xpRes = sim.awardPlayerXp(xpForLv5);
+  assert.equal(xpRes.leveledUp, true);
+  assert.equal(xpRes.newLevel, 5);
+  assert.deepEqual(xpRes.unlockedMilestones, [2, 5]);
+  assert.equal(sim.getHudSnapshot().readyMilestonesCount, 2);
+
+  // Claim Lv.2 passive buff (+15 Castle Max HP + 15 Gems)
+  const gemsBefore = sim.gems;
+  const lv2Res = sim.claimMilestoneReward(2);
+  assert.equal(lv2Res.ok, true);
+  assert.equal(lv2Res.gems, 15);
+  assert.equal(sim.gems, gemsBefore + 15);
+  assert.equal(sim.baseMaxHp, baseCastleHp + 15);
+
+  // Double-claim is blocked
+  assert.equal(sim.claimMilestoneReward(2).ok, false);
+
+  // Claim Lv.5 rare aesthetic (Anel Brasa Celestial) -> unlocks & auto-equips
+  const lv5Res = sim.claimMilestoneReward(5);
+  assert.equal(lv5Res.ok, true);
+  assert.equal(lv5Res.unlockedSkin, 'celestial');
+  assert.equal(sim.equippedRingSkin, 'celestial');
+  assert.ok(sim.unlockedCosmetics.includes('ring:celestial'));
+
+  // Reach Player Level 16 -> claim Lv.12 (Rastro Astral FX) and Lv.16 (+6% Global Damage, +3% Crit)
+  sim.awardPlayerXp(PLAYER_LEVEL_XP_THRESHOLDS[15] - sim.playerXp);
+  assert.equal(sim.getPlayerLevel(), 16);
+
+  const lv12Res = sim.claimMilestoneReward(12);
+  assert.equal(lv12Res.ok, true);
+  assert.equal(lv12Res.unlockedFx, 'astral');
+  assert.equal(sim.equippedFxStyle, 'astral');
+
+  const lv16Res = sim.claimMilestoneReward(16);
+  assert.equal(lv16Res.ok, true);
+  const bonuses = computeMilestonePassiveBonuses(sim.claimedMilestoneLevels);
+  assert.equal(bonuses.castleMaxHpBonus, 15);
+  assert.equal(bonuses.globalDamageBonusPct, 0.06);
+  assert.ok(sim.hero.damage > baseHeroDmg, 'Lv.16 passive buff must boost Hero damage permanently');
+
+  // Verify permanent passive buff persists cleanly across a new stage start
+  sim.resetWorld('playing', 2, 'archer');
+  assert.ok(sim.baseMaxHp >= 115, `Castle Max HP should include +15 milestone buff on new stage, got ${sim.baseMaxHp}`);
+});
+
+
+
 
 
 

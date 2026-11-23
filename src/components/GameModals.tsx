@@ -2,16 +2,21 @@ import React, { useEffect, useState } from 'react';
 import {
   ArrowLeft,
   ArrowRight,
+  Award,
   BookOpen,
   ChevronLeft,
   ChevronRight,
+  ClipboardCheck,
   Compass,
+  Crown,
+  Gem,
   Home,
   Lock,
   Palette,
   Play,
   RotateCcw,
   ShieldAlert,
+  ShoppingBag,
   Shuffle,
   Sparkles,
   Trophy,
@@ -20,6 +25,7 @@ import {
 } from 'lucide-react';
 import titlePixelArt from '../assets/images/title_pixel_heroes_pets_1795398207404.jpg';
 import { soundEngine } from '../game/audio';
+import { MAX_EQUIPPED_RELICS } from '../game/storeCatalog';
 import {
   ALLY_ALBUM,
   ENEMY_ALBUM,
@@ -54,6 +60,7 @@ import {
 import { TALENT_SPECS } from '../game/simulation';
 import { AlbumTab } from './AlbumModal';
 import { PetPortraitSvg } from './PetArtwork';
+import { StoreTab } from './StoreModal';
 
 type TitleScreenView = 'splash' | 'hub';
 type HubModalKind = 'hero' | 'pet' | 'stage' | 'talents' | 'shop' | null;
@@ -77,6 +84,8 @@ interface GameModalsProps {
   onRestart: () => void;
   onReturnTitle: () => void;
   onOpenAlbum: (tab: AlbumTab) => void;
+  onOpenStore: (tab?: StoreTab) => void;
+  onOpenMilestones: () => void;
 }
 
 const STAGES_PER_CHAPTER = 10;
@@ -132,6 +141,8 @@ export const GameModals: React.FC<GameModalsProps> = ({
   onRestart,
   onReturnTitle,
   onOpenAlbum,
+  onOpenStore,
+  onOpenMilestones,
 }) => {
   const [chapterIndex, setChapterIndex] = useState(() =>
     Math.floor((Math.max(1, selectedStage) - 1) / STAGES_PER_CHAPTER)
@@ -477,8 +488,23 @@ export const GameModals: React.FC<GameModalsProps> = ({
                 EMBER RING
               </h1>
 
-              <div className="font-mono-tabular text-right text-xs font-bold whitespace-nowrap text-[#FACC15] sm:text-sm">
-                {hud.emberSouls} Almas de Brasa
+              <div className="font-mono-tabular flex items-center gap-2.5 text-right text-xs font-bold whitespace-nowrap sm:text-sm">
+                {hud.vipNoAds && (
+                  <span className="inline-flex items-center gap-1 rounded-md border border-[#FACC15]/60 bg-[#422006] px-1.5 py-0.5 text-[10px] font-bold uppercase text-[#FACC15]">
+                    <Crown className="h-3 w-3" />
+                    VIP
+                  </span>
+                )}
+                <span className="text-[#E9D5FF]" title="Nível de Experiência do Jogador">
+                  Nv.{hud.playerLevel}
+                </span>
+                <span aria-hidden="true" className="text-[#475569]">·</span>
+                <span className="flex items-center gap-1 text-[#00D4FF]" title="Gemas Arcanas">
+                  <Gem className="h-3.5 w-3.5" />
+                  {hud.gems}
+                </span>
+                <span aria-hidden="true" className="text-[#475569]">·</span>
+                <span className="text-[#FACC15]">{hud.emberSouls} Almas</span>
               </div>
             </header>
 
@@ -571,7 +597,11 @@ export const GameModals: React.FC<GameModalsProps> = ({
                   </div>
                   <div className="min-w-0 flex-1">
                     <div className="font-display text-base font-bold whitespace-nowrap text-white">
-                      {hud.petChoiceUnlocked ? 'Pet Escolhido' : 'Escolher Pet'}
+                      {hud.vipNoAds
+                        ? 'Pet VIP'
+                        : hud.petChoiceUnlocked
+                          ? 'Pet Escolhido'
+                          : 'Escolher Pet'}
                     </div>
                     <div
                       className="mt-0.5 truncate text-xs font-semibold"
@@ -625,11 +655,105 @@ export const GameModals: React.FC<GameModalsProps> = ({
                 <span>Play · Fase {selectedStage}</span>
               </button>
 
-              {/* Row 3: Completely Separated Collection & Progression Buttons */}
+              {/* Row 3: Completely Separated Store, Missions, Milestones, Relics, Talents, Achievements, Albums */}
               <section
-                aria-label="Conquistas, Álbuns, Talentos e Aparências"
-                className="grid w-full grid-cols-2 gap-2.5 sm:grid-cols-4"
+                aria-label="Loja, Missões, Marcos, Relíquias, Talentos, Conquistas e Álbuns"
+                className="grid w-full grid-cols-2 gap-2.5 sm:grid-cols-4 lg:grid-cols-7"
               >
+                <button
+                  type="button"
+                  data-testid="open-store-modal"
+                  onClick={() => {
+                    soundEngine.playClick();
+                    onOpenStore('featured');
+                  }}
+                  className="flex min-h-[68px] flex-col items-center justify-center gap-1 rounded-2xl border-2 border-[#FACC15]/80 bg-gradient-to-b from-[#422006]/90 to-[#0F172A]/95 px-2.5 py-3 text-center shadow-[0_4px_0_rgba(2,6,23,0.85)] transition-transform hover:-translate-y-0.5 hover:border-[#FEF08A]"
+                >
+                  <ShoppingBag className="h-5 w-5 text-[#FACC15]" />
+                  <span className="font-display text-sm font-bold whitespace-nowrap text-white">
+                    Loja
+                  </span>
+                  <span className="font-mono-tabular text-[11px] font-semibold text-[#FEF08A]">
+                    {!hud.dailyRewardClaimedToday ? 'Presente!' : `${hud.gems} Gemas`}
+                  </span>
+                </button>
+
+                <button
+                  type="button"
+                  data-testid="open-missions-modal"
+                  onClick={() => {
+                    soundEngine.playClick();
+                    onOpenStore('missions');
+                  }}
+                  className="flex min-h-[68px] flex-col items-center justify-center gap-1 rounded-2xl border-2 border-[#00D4FF]/70 bg-gradient-to-b from-[#082F49]/90 to-[#0F172A]/95 px-2.5 py-3 text-center shadow-[0_4px_0_rgba(2,6,23,0.85)] transition-transform hover:-translate-y-0.5 hover:border-[#BAE6FD]"
+                >
+                  <ClipboardCheck className="h-5 w-5 text-[#00D4FF]" />
+                  <span className="font-display text-sm font-bold whitespace-nowrap text-white">
+                    Missões
+                  </span>
+                  <span className="font-mono-tabular text-[11px] font-semibold text-[#BAE6FD]">
+                    {hud.dailyMissions.some((m) => !m.claimed && m.progress >= m.target)
+                      ? 'Resgatar!'
+                      : `${hud.dailyMissions.filter((m) => m.claimed).length}/3 hoje`}
+                  </span>
+                </button>
+
+                <button
+                  type="button"
+                  data-testid="open-milestones-modal"
+                  onClick={() => {
+                    soundEngine.playClick();
+                    onOpenMilestones();
+                  }}
+                  className="flex min-h-[68px] flex-col items-center justify-center gap-1 rounded-2xl border-2 border-[#C084FC]/75 bg-gradient-to-b from-[#2E1065]/90 to-[#0F172A]/95 px-2.5 py-3 text-center shadow-[0_4px_0_rgba(2,6,23,0.85)] transition-transform hover:-translate-y-0.5 hover:border-[#E9D5FF]"
+                >
+                  <Award className="h-5 w-5 text-[#E9D5FF]" />
+                  <span className="font-display text-sm font-bold whitespace-nowrap text-white">
+                    Marcos
+                  </span>
+                  <span className="font-mono-tabular text-[11px] font-semibold text-[#E9D5FF]">
+                    {hud.readyMilestonesCount > 0
+                      ? `Resgatar (${hud.readyMilestonesCount})`
+                      : `Nv.${hud.playerLevel} · ${hud.claimedMilestoneLevels.length}/10`}
+                  </span>
+                </button>
+
+                <button
+                  type="button"
+                  data-testid="open-relics-modal"
+                  onClick={() => {
+                    soundEngine.playClick();
+                    onOpenStore('relics');
+                  }}
+                  className="flex min-h-[68px] flex-col items-center justify-center gap-1 rounded-2xl border-2 border-[#334155] bg-[#0F172A]/92 px-3 py-3 text-center shadow-[0_4px_0_rgba(2,6,23,0.85)] transition-transform hover:-translate-y-0.5 hover:border-[#C084FC]"
+                >
+                  <Gem className="h-5 w-5 text-[#C084FC]" />
+                  <span className="font-display text-sm font-bold whitespace-nowrap text-white">
+                    Relíquias
+                  </span>
+                  <span className="font-mono-tabular text-[11px] font-semibold text-[#94A3B8]">
+                    {hud.equippedRelics.length}/{MAX_EQUIPPED_RELICS} ativas
+                  </span>
+                </button>
+
+                <button
+                  type="button"
+                  data-testid="open-talents-modal"
+                  onClick={() => {
+                    soundEngine.playClick();
+                    setActiveHubModal('talents');
+                  }}
+                  className="flex min-h-[68px] flex-col items-center justify-center gap-1 rounded-2xl border-2 border-[#334155] bg-[#0F172A]/92 px-3 py-3 text-center shadow-[0_4px_0_rgba(2,6,23,0.85)] transition-transform hover:-translate-y-0.5 hover:border-[#F59E0B]"
+                >
+                  <Sparkles className="h-5 w-5 text-[#F59E0B]" />
+                  <span className="font-display text-sm font-bold whitespace-nowrap text-white">
+                    Talentos
+                  </span>
+                  <span className="font-mono-tabular text-[11px] font-semibold text-[#FACC15]">
+                    {hud.emberSouls} Almas
+                  </span>
+                </button>
+
                 <button
                   type="button"
                   data-testid="open-achievements-album"
@@ -663,42 +787,6 @@ export const GameModals: React.FC<GameModalsProps> = ({
                   </span>
                   <span className="font-mono-tabular text-[11px] font-semibold text-[#94A3B8]">
                     {unlockedEnemies + unlockedAllies}/60 cards
-                  </span>
-                </button>
-
-                <button
-                  type="button"
-                  data-testid="open-talents-modal"
-                  onClick={() => {
-                    soundEngine.playClick();
-                    setActiveHubModal('talents');
-                  }}
-                  className="flex min-h-[68px] flex-col items-center justify-center gap-1 rounded-2xl border-2 border-[#334155] bg-[#0F172A]/92 px-3 py-3 text-center shadow-[0_4px_0_rgba(2,6,23,0.85)] transition-transform hover:-translate-y-0.5 hover:border-[#F59E0B]"
-                >
-                  <Sparkles className="h-5 w-5 text-[#F59E0B]" />
-                  <span className="font-display text-sm font-bold whitespace-nowrap text-white">
-                    Talentos
-                  </span>
-                  <span className="font-mono-tabular text-[11px] font-semibold text-[#FACC15]">
-                    {hud.emberSouls} Almas
-                  </span>
-                </button>
-
-                <button
-                  type="button"
-                  data-testid="open-shop-modal"
-                  onClick={() => {
-                    soundEngine.playClick();
-                    setActiveHubModal('shop');
-                  }}
-                  className="flex min-h-[68px] flex-col items-center justify-center gap-1 rounded-2xl border-2 border-[#334155] bg-[#0F172A]/92 px-3 py-3 text-center shadow-[0_4px_0_rgba(2,6,23,0.85)] transition-transform hover:-translate-y-0.5 hover:border-[#10B981]"
-                >
-                  <Palette className="h-5 w-5 text-[#6EE7B7]" />
-                  <span className="font-display text-sm font-bold whitespace-nowrap text-white">
-                    Aparências
-                  </span>
-                  <span className="truncate max-w-full text-[11px] font-semibold text-[#6EE7B7]">
-                    {RING_SKINS[hud.equippedRingSkin].name.replace('Anel ', '')}
                   </span>
                 </button>
               </section>

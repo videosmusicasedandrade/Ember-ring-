@@ -3,10 +3,13 @@ import { AlbumModal, AlbumTab } from './components/AlbumModal';
 import { GameCanvas } from './components/GameCanvas';
 import { GameHUD } from './components/GameHUD';
 import { GameModals } from './components/GameModals';
+import { MilestoneModal } from './components/MilestoneModal';
 import { SimulatedAdModal } from './components/SimulatedAdModal';
+import { StoreModal, StoreTab } from './components/StoreModal';
 import { soundEngine } from './game/audio';
 import { getUnlockedAlliesForStage } from './game/bestiaryData';
 import { GameSimulation } from './game/simulation';
+import { ConsumableId, PlayStoreSkuId, RelicId } from './game/storeCatalog';
 import {
   FxStyleId,
   HeroClass,
@@ -63,6 +66,8 @@ export default function App() {
     () => simRef.current!.currentStage
   );
   const [albumTab, setAlbumTab] = useState<AlbumTab | null>(null);
+  const [storeTab, setStoreTab] = useState<StoreTab | null>(null);
+  const [milestonesOpen, setMilestonesOpen] = useState(false);
   const [simulatedAd, setSimulatedAd] = useState<{ open: boolean; targetPet: PetKind | null }>({
     open: false,
     targetPet: null,
@@ -158,6 +163,137 @@ export default function App() {
     wasPlayingBeforeAdRef.current = false;
     syncHud();
   }, [simulatedAd.targetPet, syncHud]);
+
+  const handlePurchasePlayStore = useCallback(
+    (sku: PlayStoreSkuId) => {
+      const sim = simRef.current;
+      if (!sim) return { ok: false, message: 'Simulação indisponível.' };
+      const res = sim.purchasePlayStoreProduct(sku);
+      syncHud();
+      return { ok: res.ok, message: res.message };
+    },
+    [syncHud]
+  );
+
+  const handleOpenRelicChest = useCallback(
+    (count: 1 | 5) => {
+      const sim = simRef.current;
+      if (!sim) return { ok: false, pulls: [], message: 'Simulação indisponível.' };
+      const res = sim.openRelicChest(count);
+      syncHud();
+      return res;
+    },
+    [syncHud]
+  );
+
+  const handleToggleEquipRelic = useCallback(
+    (relicId: RelicId) => {
+      const sim = simRef.current;
+      if (!sim) return false;
+      const ok = sim.toggleEquipRelic(relicId);
+      syncHud();
+      return ok;
+    },
+    [syncHud]
+  );
+
+  const handleBuyConsumable = useCallback(
+    (id: ConsumableId) => {
+      const sim = simRef.current;
+      if (!sim) return false;
+      const ok = sim.buyConsumableWithGems(id);
+      syncHud();
+      return ok;
+    },
+    [syncHud]
+  );
+
+  const handleBuySoulsBundle = useCallback(() => {
+    const sim = simRef.current;
+    if (!sim) return false;
+    const ok = sim.buySoulsBundleWithGems();
+    syncHud();
+    return ok;
+  }, [syncHud]);
+
+  const handleClaimDailyReward = useCallback(() => {
+    const sim = simRef.current;
+    if (!sim) return { ok: false, gems: 0, souls: 0 };
+    const res = sim.claimDailyStoreReward();
+    syncHud();
+    return res;
+  }, [syncHud]);
+
+  const handleClaimSeasonPassReward = useCallback(
+    (tier: number, track: 'free' | 'premium') => {
+      const sim = simRef.current;
+      if (!sim) return false;
+      const ok = sim.claimSeasonPassReward(tier, track);
+      syncHud();
+      return ok;
+    },
+    [syncHud]
+  );
+
+  const handleClaimDailyMission = useCallback(
+    (missionId: string) => {
+      const sim = simRef.current;
+      if (!sim) return { ok: false, gems: 0, souls: 0, passXp: 0, title: '' };
+      const res = sim.claimDailyMission(missionId);
+      syncHud();
+      return res;
+    },
+    [syncHud]
+  );
+
+  const handleTriggerSocialMission = useCallback(
+    (kind: 'visit_instagram' | 'share_game') => {
+      const sim = simRef.current;
+      if (!sim) return { ok: false, gems: 0, souls: 0, message: 'Simulação indisponível.' };
+      const res = sim.triggerSocialMission(kind);
+      syncHud();
+      return res;
+    },
+    [syncHud]
+  );
+
+  const handleClaimDailyAllCompleteBonus = useCallback(() => {
+    const sim = simRef.current;
+    if (!sim) return { ok: false, gems: 0, keys: 0 };
+    const res = sim.claimDailyAllCompleteBonus();
+    syncHud();
+    return res;
+  }, [syncHud]);
+
+  const handleClaimMilestone = useCallback(
+    (level: number) => {
+      const sim = simRef.current;
+      if (!sim) {
+        return {
+          ok: false,
+          title: '',
+          rewardType: 'passive' as const,
+          gems: 0,
+          souls: 0,
+        };
+      }
+      const res = sim.claimMilestoneReward(level);
+      syncHud();
+      return res;
+    },
+    [syncHud]
+  );
+
+  const handleUseConsumable = useCallback(
+    (id: ConsumableId) => {
+      const sim = simRef.current;
+      if (!sim) return;
+      if (sim.useConsumable(id)) {
+        syncHud();
+      }
+    },
+    [syncHud]
+  );
 
   const handleSelectStage = useCallback(
     (stageNum: number) => {
@@ -419,6 +555,9 @@ export default function App() {
         else if (e.key === 'q' || e.key === 'Q') handleActivateSpell('blade');
         else if (e.key === 'w' || e.key === 'W') handleActivateSpell('shockwave');
         else if (e.key === 'e' || e.key === 'E') handleActivateSpell('overcharge');
+        else if (e.key === 'z' || e.key === 'Z') handleUseConsumable('castle_potion');
+        else if (e.key === 'x' || e.key === 'X') handleUseConsumable('meteor_scroll');
+        else if (e.key === 'c' || e.key === 'C') handleUseConsumable('frenzy_flask');
       }
     };
 
@@ -432,6 +571,7 @@ export default function App() {
     handleToggleHeroReposition,
     handleToggleMuteSfx,
     handleTogglePause,
+    handleUseConsumable,
     selectedStage,
     syncHud,
   ]);
@@ -453,6 +593,7 @@ export default function App() {
         onSelectPet={handleSelectPet}
         onRequestPetAd={handleRequestPetAd}
         onActivateSpell={handleActivateSpell}
+        onUseConsumable={handleUseConsumable}
         onTogglePause={handleTogglePause}
         onToggleMuteMusic={handleToggleMuteMusic}
         onToggleMuteSfx={handleToggleMuteSfx}
@@ -478,6 +619,34 @@ export default function App() {
         onRestart={() => handleStart(hud.stage)}
         onReturnTitle={handleReturnTitle}
         onOpenAlbum={(tab) => setAlbumTab(tab)}
+        onOpenStore={(tab) => setStoreTab(tab ?? 'featured')}
+        onOpenMilestones={() => setMilestonesOpen(true)}
+      />
+      <MilestoneModal
+        isOpen={milestonesOpen}
+        hud={hud}
+        onClose={() => setMilestonesOpen(false)}
+        onClaimMilestone={handleClaimMilestone}
+        onEquipRingSkin={handleBuyOrEquipRingSkin}
+        onEquipFxStyle={handleBuyOrEquipFxStyle}
+      />
+      <StoreModal
+        isOpen={storeTab !== null}
+        initialTab={storeTab ?? 'featured'}
+        hud={hud}
+        onClose={() => setStoreTab(null)}
+        onPurchasePlayStore={handlePurchasePlayStore}
+        onOpenRelicChest={handleOpenRelicChest}
+        onToggleEquipRelic={handleToggleEquipRelic}
+        onBuyConsumable={handleBuyConsumable}
+        onBuySoulsBundle={handleBuySoulsBundle}
+        onClaimDailyReward={handleClaimDailyReward}
+        onClaimSeasonPassReward={handleClaimSeasonPassReward}
+        onBuyOrEquipRingSkin={handleBuyOrEquipRingSkin}
+        onBuyOrEquipFxStyle={handleBuyOrEquipFxStyle}
+        onClaimDailyMission={handleClaimDailyMission}
+        onTriggerSocialMission={handleTriggerSocialMission}
+        onClaimDailyAllCompleteBonus={handleClaimDailyAllCompleteBonus}
       />
       <AlbumModal
         isOpen={albumTab !== null}
